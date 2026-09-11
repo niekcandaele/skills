@@ -521,7 +521,7 @@ evidence, custom gates, and CI history. It must support these final PR sections:
 With `--no-ci`, invoke the default update path once:
 
 ```text
-/create-pr --context={terminal_context} --no-comments --no-push --pr={pr_url}
+/create-pr --context={terminal_context} --no-push --pr={pr_url}
            --base={TARGET_BRANCH} --plan-file={plan_file}
 ```
 
@@ -604,13 +604,13 @@ When CI is affirmatively green:
 
    ```text
    /create-pr --ready --pr={pr_url} --head-sha={approved HEAD_SHA}
-              --context={terminal_context} --no-comments
+              --context={terminal_context}
               --base={TARGET_BRANCH} --plan-file={plan_file}
               [--reviewer={resolved_distinct_handle}]
    ```
 
 3. If the observed PR is already ready, do not invoke `--ready` again. Publish the rebuilt
-   terminal context through the default existing-update path with `--no-push --no-comments`,
+   terminal context through the default existing-update path with `--no-push`,
    then inspect and require the state to remain ready and head to remain the approved SHA.
 4. Require final `PR_STATE: ready`. Reviewer assignment on a draft transition is reported
    but never blocks it.

@@ -5,7 +5,7 @@ request. Build one **forge binding** for the current repository before performin
 requested operation. The binding is the sole provider-specific layer; callers such as
 `player-coach` describe lifecycle intent only through `create-pr` flags.
 
-Body and comment files are the input of record so Markdown stays literal. Where a CLI has
+Body files are the input of record so Markdown stays literal. Where a CLI has
 no file flag, read that file exactly once into the command argument. Resolve the current
 branch with `git branch --show-current` and the full head SHA with `git rev-parse HEAD`
 before mutation.
@@ -23,18 +23,15 @@ A binding supplies these operations:
 | `create` | Create a normal, reviewable change from the current branch. |
 | `draft` | Create a draft, or update the existing change and leave it draft. |
 | `update` | Replace the existing change's body and, only when explicitly requested, title; never retarget it or change draft state. |
-| `comment` | Add a new append-only top-level comment from a file and return its identifier. |
 | `ready` | Mark the existing draft ready without merging it. |
 | `reviewer` | Request review from a resolved handle distinct from the authenticated user. |
 | `labels` | List and apply only labels that already exist. |
-| `inline` | Add an inline self-review comment to an added line. |
 | `merge-policy` | Return provider-allowed merge methods and the repository's required/preferred method. |
 | `merge` | Merge the exact ready head with the repository's permitted method and confirm observed merged state; used only by an authorized caller such as `epic-runner`. |
 
-`inspect`, `push`, `draft`, `update`, and `ready` are required by the durable PR lifecycle;
-`comment` is required only by a caller that appends one. `fetch-head` is conditionally
-required only when an inspected head is absent from the local object store and the selected
-path must render its diff. If the
+`inspect`, `push`, `draft`, `update`, and `ready` are required by the durable PR lifecycle.
+`fetch-head` is conditionally required only when an inspected head is absent from the local
+object store and the selected path must render its diff. If the
 selected provider cannot perform a requested required operation, fail before mutating
 anything else in that invocation. `reviewer` is best-effort: a missing candidate or failed
 assignment is reported but never reverses a successful ready transition.
@@ -64,14 +61,8 @@ methods with an explicit repository rule from its engineer skill, CONTRIBUTING g
 or caller context. If several methods remain and none is declared preferred, fail the
 operation; never silently choose squash.
 
-Top-level comments are append-only under this binding. It never edits, resolves, or
-deletes one, and records each returned identifier. Forge administrators may retain their
-own moderation powers, so append-only here means that this workflow performs no mutation
-after creation, not that the provider offers write-once storage.
-
-The `--head-sha` used to publish a comment is the exact current remote-head concurrency
-guard, checked before and after the mutation. It asserts what the change looks like right
-now; it never certifies anything about the comment's content.
+This binding has no comment operation. `create-pr` writes the description and nothing else:
+it never creates a top-level comment, note, or inline review on a change.
 
 ## GitHub binding
 
@@ -120,10 +111,6 @@ gh -R "$BASE_REPOSITORY" pr ready "$PR_NUMBER" --undo  # only for --draft when i
 # update without changing state/target; add --title only for an explicit title
 gh -R "$BASE_REPOSITORY" pr edit "$PR_NUMBER" --body-file "$BODY_FILE"
 
-# append-only top-level comment
-gh -R "$BASE_REPOSITORY" pr comment "$PR_NUMBER" --body-file "$COMMENT_FILE"
-# retain the returned comment URL as COMMENT_ID
-
 # mark ready
 gh -R "$BASE_REPOSITORY" pr ready "$PR_NUMBER"
 
@@ -143,14 +130,9 @@ esac
 gh -R "$BASE_REPOSITORY" pr view "$PR_NUMBER" \
   --json state,autoMergeRequest,mergeStateStatus
 
-# existing labels and inline self-review
+# existing labels
 gh -R "$BASE_REPOSITORY" label list --json name --jq '.[].name'
 gh -R "$BASE_REPOSITORY" pr edit "$PR_NUMBER" --add-label "$LABEL"
-jq -n --arg body "$COMMENT_BODY" --arg path "$FILE_PATH" --argjson line "$LINE_NUM" \
-  '{body: "Agent self-review", event: "COMMENT", comments: [{path: $path, line: $line, side: "RIGHT", body: $body}]}' \
-  > "$REVIEW_FILE"
-gh api --hostname "$BASE_HOST" "repos/$BASE_REPOSITORY_PATH/pulls/$PR_NUMBER/reviews" \
-  --method POST --input "$REVIEW_FILE"
 ```
 
 Use `gh pr view` again after `draft` or `ready` and confirm the expected `isDraft` value.
@@ -235,10 +217,6 @@ glab -R "$BASE_REPOSITORY_SELECTOR" mr update "$MR_IID" --draft --yes \
 glab -R "$BASE_REPOSITORY_SELECTOR" mr update "$MR_IID" --yes \
   --description "$(<"$BODY_FILE")"
 
-# append-only, non-resolvable top-level note
-glab -R "$BASE_REPOSITORY_SELECTOR" mr note create "$MR_IID" --resolvable=false < "$COMMENT_FILE"
-# retain the returned note identifier or URL as COMMENT_ID
-
 # mark ready
 glab -R "$BASE_REPOSITORY_SELECTOR" mr update "$MR_IID" --ready --yes
 
@@ -264,39 +242,22 @@ esac
 glab -R "$BASE_REPOSITORY_SELECTOR" mr view "$MR_IID" --output json \
   | jq '{state: .state, queued: (.merge_when_pipeline_succeeds // false), mergeStatus: (.detailed_merge_status // .merge_status)}'
 
-# existing labels and inline self-review
+# existing labels
 glab -R "$BASE_REPOSITORY_SELECTOR" label list --output json
 glab -R "$BASE_REPOSITORY_SELECTOR" mr update "$MR_IID" --label "$LABEL" --yes
-DIFF_REFS=$(glab api --hostname "$BASE_HOST" \
-  "projects/$BASE_PROJECT_ID/merge_requests/$MR_IID" | jq '.diff_refs')
-jq -n --arg body "$COMMENT_BODY" --arg path "$FILE_PATH" --argjson line "$LINE_NUM" \
-  --arg base "$(echo "$DIFF_REFS" | jq -r .base_sha)" \
-  --arg start "$(echo "$DIFF_REFS" | jq -r .start_sha)" \
-  --arg head "$(echo "$DIFF_REFS" | jq -r .head_sha)" \
-  '{body: $body, position: {base_sha: $base, start_sha: $start, head_sha: $head, position_type: "text", new_path: $path, new_line: $line}}' \
-  > "$DISCUSSION_FILE"
-glab api --hostname "$BASE_HOST" \
-  "projects/$BASE_PROJECT_ID/merge_requests/$MR_IID/discussions" \
-  --method POST --header "Content-Type: application/json" --input "$DISCUSSION_FILE"
 ```
 
 Inspect again after `draft` or `ready`; confirm the returned draft/work-in-progress state.
 For an explicit URL, require the inspected canonical URL to identify the selected base
 repository and normalized IID; reject a mismatched selector, but permit a checkout whose
 `origin` is the MR's inspected head fork.
-GitLab comments use `--resolvable=false` deliberately, so an appended record cannot later
-disappear behind a resolved discussion. Inline comments are different: build
-their JSON position from the MR's `diff_refs` and verify the returned note is a `DiffNote`
-with a non-null position.
-
 ## Other authenticated providers
 
 Remote-host string matching is only a hint. If the repository is neither GitHub nor
 GitLab, inspect the authenticated provider capabilities exposed by the harness and resolve
 an equivalent binding with all requested required operations. Write down the concrete
 operation names or commands before the first mutation, including how draft state is
-verified and how append-only top-level comments are created.
+verified.
 
 If no authenticated capability supplies an exact equivalent, stop with the missing
-operation named. A regular issue comment, edited description section, local log, or
-resolvable review thread is not an equivalent to an append-only top-level comment.
+operation named.

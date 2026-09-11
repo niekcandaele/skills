@@ -397,7 +397,7 @@ found by that marker and edited, so a PR that survives five sweeps still shows o
 It is the run's memory: everything the next sweep needs to know is in it.
 
 Renovator owns this comment directly through the provider (providers §Comment), because
-`create-pr`'s comments are append-only by design and would leave a growing stack.
+`create-pr` writes only a PR description and posts no comments at all.
 
 Keep it under five minutes to read. Content follows the situation rather than a template —
 a trivial merge deserves two lines, a major runtime bump deserves the findings scoped to our
