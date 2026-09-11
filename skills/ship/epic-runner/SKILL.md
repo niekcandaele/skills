@@ -441,12 +441,12 @@ order, through `PUBLISH_STATE`. For every queued, merged, or scheduler-terminal 
 state, the delivery-agent writes a mode-0600 context beginning `CONTEXT_KIND: delivery-state`
 with the exact PR state, approved head, the complete `check-ci` proof, queue or merge
 evidence, and any failure reason, and publishes it through `create-pr` with
-`--no-comments --no-push` against the PR and the approved-or-last-observed full remote head.
+`--no-push` against the PR and the approved-or-last-observed full remote head.
 
 `create-pr` preserves the existing journey/testing/friction body and replaces only its
 bounded generated Final State block. The dispatch requires post-update inspection to preserve
-the exact head and intended PR state. On scheduler failure it also appends one
-agent-attributed terminal comment through `--comment-file`. Earlier comments are never edited.
+the exact head and intended PR state. A scheduler failure is recorded in that same Final State
+block and in the tracker's terminal-failure comment; the PR itself receives no comment.
 
 ### Publishing tracker state
 
