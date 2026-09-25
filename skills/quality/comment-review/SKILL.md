@@ -104,8 +104,9 @@ Never exceed 6 — no comment issue outranks a real correctness or security bug.
 
 Reconstruct the diff from `SCOPE_METADATA`'s `diff_command`, **adding `-U20`** so each
 hunk carries 20 lines of surrounding context. Filter to `^\+` for the added lines, and
-keep those matching the comment syntax of each file's language — but retain the
-surrounding context lines, which is what steps 2 and 3 judge against.
+mark those matching the comment syntax of each file's language — but retain the
+added code lines (step 5 counts them) and the surrounding context lines, which is
+what steps 2 and 3 judge against.
 
 The `-U20` window is the point: it captures the pre-existing adjacent comments `stale`
 needs and enough surrounding code to judge `redundant` and `appeasement`, at a fraction
@@ -158,7 +159,7 @@ line comment, written out in full.
 ### 5. Density
 
 Individual comments can each look defensible while the diff as a whole drowns
-the code; this step measures the aggregate. From the added lines of step 1,
+the code; this step measures the aggregate. From all added lines of step 1,
 excluding docs, generated files, lockfiles, and fixtures, count added comment
 lines (including docstring lines) and added code lines (non-blank, non-comment).
 When comment ÷ code exceeds the threshold, emit exactly one `density` finding.

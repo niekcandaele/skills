@@ -678,8 +678,9 @@ Review ONLY comments and docstrings added or modified in the scoped diff
 Flag: ephemeral review-ID references (VI-N, CI-N, "per review feedback"),
 historical change-narration ("previously", "now we", "replaced X with Y"),
 stale comments contradicting the code, reviewer-appeasement, redundant restatement,
-verbose rationale that a 1–2 line comment would carry, and one diff-level finding when
-added comment lines exceed 10% of added code lines.
+verbose rationale that a 1–2 line comment would carry, and one diff-level density
+finding per the skill's step 5 (default 10% of added code lines; pass the project's
+threshold when its agent instructions set one).
 Comments must describe the current code and its intent — git owns history.
 Code correctness, design, and prose docs are out of scope — other skills own those.
 Normalize findings into: title, severity (floor 5, cap 6 — the floor is deliberate),
