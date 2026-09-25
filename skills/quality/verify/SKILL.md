@@ -354,7 +354,7 @@ Assign each the full scoped file list.
 - reviewer          Business logic, architecture, patterns, security, robustness,
                     over-engineering. Needs breadth across the whole diff.
 - codex-reviewer    General second-opinion pass, not a specialist router target.
-- comment-review    Ephemeral references and history comments appear in any changed file.
+- comment-review    Comment rot, verbose rationale, and comment density can appear in any changed file.
 - qa                Test coverage assessment for everything that changed.
 - tester            Any code change could affect tests.
 
@@ -677,7 +677,10 @@ Review ONLY comments and docstrings added or modified in the scoped diff
 (plus pre-existing comments the changes make stale).
 Flag: ephemeral review-ID references (VI-N, CI-N, "per review feedback"),
 historical change-narration ("previously", "now we", "replaced X with Y"),
-stale comments contradicting the code, reviewer-appeasement, and redundant restatement.
+stale comments contradicting the code, reviewer-appeasement, redundant restatement,
+verbose rationale that a 1–2 line comment would carry, and one diff-level density
+finding per the skill's step 5 (default 10% of added code lines; pass the project's
+threshold when its agent instructions set one).
 Comments must describe the current code and its intent — git owns history.
 Code correctness, design, and prose docs are out of scope — other skills own those.
 Normalize findings into: title, severity (floor 5, cap 6 — the floor is deliberate),
