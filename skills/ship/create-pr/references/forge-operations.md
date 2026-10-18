@@ -58,7 +58,9 @@ explicitly to change creation. Do not infer the head repository from the base re
 
 Provider capability is not preference. For `merge-policy`, combine provider-allowed
 methods with an explicit repository rule from its engineer skill, CONTRIBUTING guidance,
-or caller context. If several methods remain and none is declared preferred, fail the
+or caller context. A caller-required `--merge-method=merge` outranks repository preference
+but never provider capability: when the provider forbids an unsquashed, unrebased merge,
+fail. If several methods remain and none is declared preferred, fail the
 operation; never silently choose squash.
 
 This binding has no comment operation. `create-pr` writes the description and nothing else:
@@ -118,7 +120,8 @@ gh -R "$BASE_REPOSITORY" pr ready "$PR_NUMBER"
 gh api user --jq .login
 gh -R "$BASE_REPOSITORY" pr edit "$PR_NUMBER" --add-reviewer "$REVIEWER"
 
-# resolve allowed methods, then use the repository-required/preferred one
+# resolve allowed methods, then use the caller-required or repository-preferred one;
+# --merge-method=merge requires mergeCommitAllowed
 gh -R "$BASE_REPOSITORY" repo view \
   --json mergeCommitAllowed,rebaseMergeAllowed,squashMergeAllowed
 case "$MERGE_METHOD" in
@@ -230,6 +233,14 @@ PROJECT_POLICY=$(glab api --hostname "$BASE_HOST" "projects/$BASE_PROJECT_ID")
 MERGE_METHOD=$(echo "$PROJECT_POLICY" | jq -er .merge_method)
 SQUASH_OPTION=$(echo "$PROJECT_POLICY" | jq -er .squash_option)
 case "$MERGE_METHOD" in merge|rebase_merge|ff) ;; *) exit 1 ;; esac
+# --merge-method=merge: merge and ff keep every parent; rebase_merge rewrites the source,
+# and squash_option=always cannot be declined
+if [ "$CALLER_METHOD" = merge ]; then
+  case "$MERGE_METHOD:$SQUASH_OPTION" in
+    rebase_merge:*|*:always) exit 1 ;;
+  esac
+  SQUASH_OPTION=never
+fi
 case "$SQUASH_OPTION" in
   always|default_on)
     glab -R "$BASE_REPOSITORY_SELECTOR" mr merge "$MR_IID" --sha "$HEAD_SHA" --yes --squash

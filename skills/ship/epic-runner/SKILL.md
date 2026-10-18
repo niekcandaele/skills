@@ -2,7 +2,8 @@
 name: epic-runner
 description: >
   Work an entire epic of tickets unattended — for each ticket: plan it, implement it, PR it
-  into an epic branch, drive CI green, merge; then verify the assembled epic once and file
+  into an epic branch, drive CI green, merge; keep the epic branch synced with its target;
+  then verify the assembled epic once, open an epic PR that merges cleanly, and file
   follow-ups. Works with any tracker: GitHub, Jira, GitLab, or a markdown checklist. Use when
   the user hands over a batch of related issues and wants them worked through autonomously
   ("run this epic", "work through these tickets", "do the whole milestone"). For a single
@@ -22,7 +23,7 @@ allowed-tools:
   - AskUserQuestion
 metadata:
   group: ship
-  requires: [create-pr, check-ci, verify]
+  requires: [create-pr, check-ci, verify, resolving-merge-conflicts]
 ---
 
 # Epic Runner — Unattended Delivery of a Whole Epic
@@ -49,6 +50,7 @@ epic-runner            you — the scheduler
 ├── plan-agent         one per ticket, plans in plan mode, writes a plan file
 ├── issue-agent        one per ticket, isolated context + worktree — implements, opens
 │                      the PR, drives CI green, returns a mergeable PR
+├── sync-agent         merges the target into the epic branch through its own PR
 ├── delivery-agent     every forge call and tracker mutation the schedule needs — CI
 │                      proof, merge, PR state, lifecycle — returned as fixed fields
 └── epic-verify-agent  one per finalization round, holds the full report so you don't
@@ -79,8 +81,11 @@ You are a scheduler over typed work items, not a for-loop over tickets.
 | Plan the next unblocked issue | no |
 | Implement an issue through to a mergeable PR | **yes** |
 | Merge a green PR | no |
+| Sync the target into the epic branch | **yes** |
 | Draft a follow-up ticket | no |
 | Verify or remediate the epic branch | **yes** |
+
+A sync runs between issues, when no issue PR is open, so nothing in flight has to absorb it.
 
 **The dev stack is the constraint** — ports, memory, the working tree. Exactly one issue is
 being implemented at a time, and that agent holds the stack through its own CI wait.
@@ -194,7 +199,8 @@ git branch "epic/$SLUG" "$BASE_REMOTE/$TARGET_BRANCH"
 git push "$BASE_REMOTE" "epic/$SLUG"
 ```
 
-If it already exists, this is a resumed run: adopt it and reconcile against the tracker as
+Record the creation time in `run.json`; the sync trigger measures age from it. If it already
+exists, this is a resumed run: adopt it and reconcile against the tracker as
 described under **State**.
 
 Two things fall out of this, and both are the point:
@@ -208,7 +214,7 @@ Two things fall out of this, and both are the point:
 
 ### 5. Check the ground
 
-Four cheap checks that each prevent a specific way the run wastes hours before failing:
+Five cheap checks that each prevent a specific way the run wastes hours before failing:
 
 - **Delivery binding.** `PREFLIGHT`, because resolving it means reading `create-pr`'s
   disclosed forge-operations reference and preflighting `check-ci` — tens of thousands of
@@ -239,6 +245,13 @@ Four cheap checks that each prevent a specific way the run wastes hours before f
   review. The epic gets one verification, in Phase 2, so a missing or unauthenticated Codex
   CLI means the run's only review happens with one fewer reviewer — and it is discovered at
   the very end, when there is no time left to do anything about it. Check it at minute one.
+- **Neighbouring epics.** Other long-lived epic branches against the same target are where
+  the worst conflicts come from, and the user is the only one who can sequence them. For
+  each other remote `epic/*` branch, report its files-touched count and top-level
+  directories since its merge-base with the target — numbers and paths, never a diff. On a
+  resumed run, also count the files it shares with this epic. Flag very large neighbours
+  and neighbours working in areas this epic's issues name. This is a warning in the
+  confirmation, nothing more.
 - **Prior run state** for this epic (see **State** below). If found, ask resume-or-fresh.
 
 ### 6. Write the shared context files
@@ -269,8 +282,8 @@ output.
 ## Phase 1: The scheduler loop
 
 Each iteration, pick the best available work item and do it. Rough priority when several
-are available: **merge a green PR** (it unblocks dependents) → **implement the next unblocked
-issue** → **plan ahead** → **draft a follow-up ticket**.
+are available: **merge a green PR** (it unblocks dependents) → **sync, when triggered** →
+**implement the next unblocked issue** → **plan ahead** → **draft a follow-up ticket**.
 
 ### Planning an issue
 
@@ -382,6 +395,92 @@ hold its URL alongside the issue.
 the retries; a fresh agent on the same code is how a scheduler spends four hours converging
 on something a person would settle in five minutes.
 
+### Syncing the target
+
+The target keeps moving while the epic runs. A **sync** merges the target into the epic
+branch — small and often, while each conflict is still small and its intent still easy to
+find, instead of once at the end across dozens of files.
+
+**When.** A sync is a dev-stack work item, and it starts only when no issue PR is open or
+queued; while a sync PR is open, no issue starts. After every merge you observe, measure the
+drift yourself — counts, not a diff:
+
+```bash
+git fetch "$BASE_REMOTE" "$TARGET_BRANCH" "epic/$SLUG"
+TARGET_SHA=$(git rev-parse "$BASE_REMOTE/$TARGET_BRANCH")
+MB=$(git merge-base "$TARGET_SHA" "$BASE_REMOTE/epic/$SLUG")
+BEHIND=$(git rev-list --count "$BASE_REMOTE/epic/$SLUG..$TARGET_SHA")
+OVERLAP=$(comm -12 <(git diff --name-only "$MB" "$BASE_REMOTE/epic/$SLUG" | sort) \
+                   <(git diff --name-only "$MB" "$TARGET_SHA" | sort) | wc -l)
+```
+
+Sync when any of these holds:
+
+- `OVERLAP` is above zero — the target changed files the epic also changed.
+- `BEHIND` is above zero and the last sync — or the epic branch's creation, both recorded in
+  `run.json` — is more than a day old.
+- An issue-agent's discoveries report a CI failure the target has already fixed.
+
+Each sync costs a CI run; that is why the trigger waits for overlap or age.
+
+**Who.** A sync-agent, in an isolated worktree, at the issue-agent's tier. `{n}` is the next
+sync number in `run.json`, so a resumed run never reuses a branch name:
+
+```
+Sync the target into the epic branch.
+
+Branch epic-{slug}-sync-{n} from {BASE_REMOTE}/epic/{slug}, then git merge {TARGET_SHA}
+(the tip of {target}). Resolve every conflict with /resolving-merge-conflicts: keep both
+sides' intent, and invent nothing. {state_dir}/epic-context.md says what the epic is
+building. Commit the result as a merge commit; never rebase or squash it.
+
+Run the project's tests and checks; fix only what the merge broke.
+
+/create-pr "Sync {target} into epic/{slug}" --base=epic/{slug} --context={your journey context}
+
+Then take the PR to green yourself:
+
+/check-ci --pr={PR_URL} {full head SHA}
+
+Fix what fails, commit, push with /create-pr --push --pr={PR_URL}, and check again. At
+most {max_ci_fixes} fix attempts, then stop and report. An hour of CI is normal — wait it
+out rather than concluding it is stuck.
+
+Write the journey — every conflicted file and how you resolved it, and every CI failure you
+fixed — to {state_dir}/syncs/{n}.md.
+
+Return ONLY this block. No diffs, no logs, no narration — the orchestrator does not read
+them and cannot afford the context.
+
+STATUS: MERGEABLE | FAILED
+PR_URL: {url or none}
+BRANCH: {branch}
+HEAD_SHA: {full 40-character SHA}
+REMOTE_HEAD_SHA: {full SHA observed on the remote after the push}
+CI_FIXES: {attempts spent}
+CONFLICTS_RESOLVED: {count of conflicted files}
+```
+
+**Landing a sync** follows **Merging** — the block check, `READ_GREEN`, `PUBLISH_STATE`,
+`MERGE`, a queued merge's polling, `INSPECT`, the merge-commit ancestry check, and the
+contamination halt — with three differences:
+
+- The `MERGE` dispatch carries `--merge-method=merge`. A squashed sync leaves the target's
+  commits out of the epic's ancestry, and every later sync fights the same conflicts again.
+- One more confirmation after the merge, with your own hands:
+  `git merge-base --is-ancestor "$TARGET_SHA" "$BASE_REMOTE/epic/$SLUG"`. A sync that
+  passed every other check but fails this one landed squashed or rebased; that is a failed
+  sync.
+- No tracker moments, no close, no graph re-evaluation — a sync belongs to no issue.
+
+Record each sync in `run.json`: time, `TARGET_SHA`, the sync PR, `CONFLICTS_RESOLVED`, and
+the outcome. When it resolved conflicts and the next issue's plan is already written,
+discard that plan and plan again — it may name code the merge just changed.
+
+**A failed sync is handled like a failed issue** — the PR and branch stay, nothing retries.
+Syncing is off for the rest of the run, the Phase 2 syncs included: keep implementing on the
+unsynced tip, which strands nothing, and let the completion report carry it.
+
 ### The delivery-agent
 
 Every forge call the schedule needs, and every tracker *mutation*, happens here. `create-pr`
@@ -400,9 +499,9 @@ and any agent you hand the tracker binding to reads it directly too.
 | `FILE_TICKET` | the drafted ticket's path | `TRACKER`, and the created issue id |
 | `PUBLISH_STATE` | PR URL, head SHA, intended state, the evidence | `PR_STATE`, `HEAD_SHA`, `MERGE_QUEUE` as the provider reports them |
 | `READ_GREEN` | PR URL, approved SHA, epic branch | every green-predicate field, and the ancestry result |
-| `MERGE` | PR URL, approved SHA, the epic branch, the green predicate, your authorization | `PR_STATE`, `HEAD_SHA`, `BASE`, `MERGE_COMMIT`, `MERGE_QUEUE`, `REASON` |
+| `MERGE` | PR URL, approved SHA, the epic branch, the green predicate, your authorization, `--merge-method=merge` for a sync | `PR_STATE`, `HEAD_SHA`, `BASE`, `MERGE_COMMIT`, `MERGE_QUEUE`, `REASON` |
 | `INSPECT` | PR URL | the same six fields as `MERGE` |
-| `OPEN_EPIC_PR` | epic branch, target branch, context path | `PR_URL`, `PR_STATE`, `BASE`, `HEAD_REF`, `HEAD_SHA` |
+| `OPEN_EPIC_PR` | epic branch, target branch, context path | `PR_URL`, `PR_STATE`, `BASE`, `HEAD_REF`, `HEAD_SHA`, `MERGEABLE` |
 
 **Every dispatch carries the binding it needs** — the delivery binding `PREFLIGHT` resolved
 for a forge operation, the tracker binding for a tracker one. A fresh context cannot turn
@@ -551,7 +650,8 @@ reread, and pending human approval, mean you do not merge — report it and stop
 
 Then invoke /create-pr --merge --pr={PR_URL} --head-sha={approved full SHA}. create-pr
 resolves the repository-preferred merge method through the preflighted delivery binding.
-Use whatever the repository prefers and override nothing.
+Use whatever the repository prefers and override nothing, unless this brief names a merge
+method — then pass it as --merge-method.
 
 Merge no head other than {approved full SHA}. If you cannot merge that exact head under
 those conditions, reporting why is the correct outcome.
@@ -565,8 +665,9 @@ REASON: {why, when not merged}
 ```
 
 Honor contrary user instructions and branch protection even after CI turns green. Squash is
-a common and good repository preference here: the epic branch gets one clean commit per
-issue, while the commit-by-commit history stays visible on the PR.
+a common and good repository preference for issue PRs: the epic branch gets one clean commit
+per issue, while the commit-by-commit history stays visible on the PR. Sync PRs are the
+exception; see **Syncing the target**.
 
 **A merge is confirmed by something other than the agent that performed it.** A tier is not
 a guard, and neither is re-reading a report against itself: an agent that merged the wrong
@@ -758,6 +859,13 @@ whole; what it does not get is a claim of completeness. The sole exception is a 
 for a contaminated epic branch — there, reviewing and PR-ing the branch is the specific thing
 that must not happen.
 
+### 0. Sync before verifying
+
+Unless syncing was switched off by a failed sync, measure the drift and, if `BEHIND` is
+above zero, sync now, whatever the trigger says. The review should read the
+code as it would land on the target, conflict resolutions included — not a branch the target
+has already moved past.
+
 ### 1. Verify the epic branch
 
 Spawn a verification agent. It holds the report so you don't:
@@ -816,6 +924,17 @@ needs a person, not another round.
 
 ### 4. Open the epic PR
 
+**An epic PR that conflicts with its target is not delivered work.** Verification takes
+hours, and the target moved during them. Unless syncing is off, measure the drift again; if
+`BEHIND` is above zero, sync once more. This late sync happens once; if the target moves
+again after it, open the PR anyway and let the mergeability check below decide.
+
+If the late sync resolved conflicts, those resolutions are code nobody has read. Give them
+one extra round, outside the three-round cap: the step 1 brief with `--depth=light` in place
+of `--depth=deep`, writing to `{state_dir}/epic-verify/late-sync.json`. Blocking findings get
+one remediation through steps 2 and 3, and no return to step 1 — anything still open goes to
+the human in the completion report.
+
 Write a context file from the run's own state — the per-issue outcomes, the verification
 result of each finalization round, and anything left blocking — then dispatch
 `OPEN_EPIC_PR` with `epic/{slug}`, `{target}`, and that path. The delivery-agent checks out
@@ -823,7 +942,8 @@ result of each finalization round, and anything left blocking — then dispatch
 checked-out branch, so the checkout is what selects the head — which is why the epic branch
 is a parameter and not something the agent infers.
 
-It returns `PR_URL`, `PR_STATE`, `BASE`, `HEAD_REF`, and `HEAD_SHA`. Require all four to
+It returns `PR_URL`, `PR_STATE`, `BASE`, `HEAD_REF`, `HEAD_SHA`, and `MERGEABLE`. Require the
+first five to
 agree with what you asked for: `PR_STATE: draft`, `BASE` of `{target}`, `HEAD_REF` of
 `epic/{slug}`, and a `HEAD_SHA` equal to the epic tip you fetch yourself —
 
@@ -841,6 +961,14 @@ correct PR at the run's final step just as readily as it blesses a wrong one.
 against the same target, and this is the one artifact the whole run hands a person.
 The dispatch carries the rule below — **open this PR as a draft and stop there**, no merge,
 no ready.
+
+`MERGEABLE` answers one question: does the head conflict with `{target}`? The dispatch
+carries that definition, because providers fold other state into their mergeability fields —
+a draft, a pending pipeline — and a draft epic PR would otherwise always read as blocked. It
+also carries the rule to re-read until the provider has finished computing: `unknown` is not
+an answer. `MERGEABLE: no` does not stop the PR from opening, but it
+changes what the run delivered: the completion report leads with the conflict under
+**NEEDS YOU**, not with **REVIEW THIS**.
 
 The context file is the epic summary for a human reviewer; it is not `epic-context.md`, which
 is the reviewer-facing backlog and has no place in a PR body.
@@ -897,6 +1025,9 @@ STRANDED     #52  blocked by #49
 
 EPIC VERIFY  round 1: {n} blocking → remediation merged; round 2: clean
              {or: round 3 still flags {thing} — the epic PR carries the detail}
+SYNC         {k} syncs, {c} with conflicts; epic/{slug} is {behind} behind {target},
+             {merges cleanly | CONFLICTS}{; syncing off since sync PR {url} failed}
+NEIGHBOURS   {other epics Phase 0 flagged, and the files they share with this one now}
 FRICTION     {CI failures and the fix attempts they cost, issues sent back to
              absorb a moved epic tip}
 PERFORMANCE  {issues green on their first CI run, CI-fix attempts per issue,
@@ -905,6 +1036,15 @@ DISCOVERIES  {n} tickets drafted{, awaiting approval}{, + 1 combined cleanup tic
 ```
 
 The epic PR leads because it is the one thing the run cannot finish for the user.
+`NEIGHBOURS` appears only when Phase 0 flagged one; recount the shared files for it.
+
+**When the epic PR conflicts with its target, this replaces the `REVIEW THIS` line** — a
+conflicting PR asks the human to finish the run's work before they can review it:
+
+```markdown
+NEEDS YOU    {epic PR url}  — draft, CONFLICTS with {target}
+             {last sync PR url and why it failed, or: the target moved after the final sync}
+```
 
 Then, with write-back on, post the report as a `COMMENT` on the epic ticket and **leave the
 epic open.** Clean verification is not delivery: the epic PR is still a draft against the default
@@ -923,10 +1063,11 @@ Run state lives outside the repository, in `$XDG_STATE_HOME/epic-runner/{project
 plans/{id}.md          materialized implementation plans
 plans/remediation-{n}.md  the finalization plans written from each epic verification
 issues/{id}.md         per-issue journey logs written by issue-agents
+syncs/{n}.md           per-sync journey logs: every conflicted file and its resolution
 discoveries/{n}.md     drafted follow-up tickets
 epic-context.md        completed / current / remaining issues, handed to planners and implementers
 epic-verify/{n}.json   the verification report for each finalization round
-run.json               status blocks, approved HEAD SHA, pending merge-queue work, inferred edges, CI-fix counts, failure reasons, and any halt
+run.json               status blocks, approved HEAD SHA, pending merge-queue work, inferred edges, CI-fix counts, epic branch creation time, sync history, failure reasons, and any halt
 ```
 
 `epic-context.md` and every report under `epic-verify/` are paths you hand to sub-agents and
@@ -967,6 +1108,10 @@ tracker state, or from a `run.json` entry that disagrees with what the forge rep
 **Resume rejoins; it does not restart.** An issue whose PR is open and mid-CI is picked up on
 its existing branch — not re-implemented on a second branch. This is why the issue id
 belongs in every branch name and PR body: it's how you recognise what you're looking at.
+An open sync PR is rejoined the same way, by its `epic-{slug}-sync-{n}` branch — unless
+`run.json` records that sync as failed, in which case syncing stays off. Otherwise measure
+the drift on resume before scheduling anything else — a run resumed days later may already
+be far behind.
 
 With `--write-back=off` there is no durable record that an issue was completed, so
 resumability genuinely degrades. Say so rather than pretending otherwise.
@@ -990,8 +1135,10 @@ resumability genuinely degrades. Say so rather than pretending otherwise.
   not given.
 - **Never bypass branch protection**, weaken a rule, or self-approve to unblock a merge.
 - **Never merge a PR that isn't affirmatively green and mergeable.**
+- **Keep the epic synced** — see **Syncing the target**. An epic PR that conflicts with its
+  target is not done.
 - **One dev-stack consumer at a time.** Implementing an issue counts, from its first commit
-  to its green PR; planning, drafting, and merging do not.
+  to its green PR, and so does a sync; planning, drafting, and merging do not.
 - **Never interrupt the run for a decision** that Phase 0 could have settled.
 - **Every ticket you file is a real ticket** — investigated, evidenced, actionable. There is
   no project where a sloppy ticket is acceptable; a throwaway repo just means nobody is
@@ -1029,7 +1176,7 @@ orchestrator picks the model, and picks against these defaults.
 | orchestrator — this skill | top |
 | plan-agent, remediation-planning agent | high |
 | epic-verify-agent | high — and not for its own sake |
-| issue-agent, ticket-writing agent | mid |
+| issue-agent, sync-agent, ticket-writing agent | mid |
 | delivery-agent on `MERGE` | mid — it is the last gate before an irreversible act |
 | delivery-agent, every other operation | low |
 
