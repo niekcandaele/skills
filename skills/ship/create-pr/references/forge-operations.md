@@ -233,11 +233,11 @@ PROJECT_POLICY=$(glab api --hostname "$BASE_HOST" "projects/$BASE_PROJECT_ID")
 MERGE_METHOD=$(echo "$PROJECT_POLICY" | jq -er .merge_method)
 SQUASH_OPTION=$(echo "$PROJECT_POLICY" | jq -er .squash_option)
 case "$MERGE_METHOD" in merge|rebase_merge|ff) ;; *) exit 1 ;; esac
-# --merge-method=merge: merge and ff keep every parent; rebase_merge rewrites the source,
-# and squash_option=always cannot be declined
+# --merge-method=merge needs a merge commit: ff creates none, rebase_merge rewrites the
+# source, and squash_option=always cannot be declined
 if [ "$CALLER_METHOD" = merge ]; then
   case "$MERGE_METHOD:$SQUASH_OPTION" in
-    rebase_merge:*|*:always) exit 1 ;;
+    rebase_merge:*|ff:*|*:always) exit 1 ;;
   esac
   SQUASH_OPTION=never
 fi

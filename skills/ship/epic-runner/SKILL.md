@@ -1111,7 +1111,8 @@ belongs in every branch name and PR body: it's how you recognise what you're loo
 An open sync PR is rejoined the same way, by its `epic-{slug}-sync-{n}` branch — unless
 `run.json` records that sync as failed, in which case syncing stays off. Otherwise measure
 the drift on resume before scheduling anything else — a run resumed days later may already
-be far behind.
+be far behind. With neither a sync history nor a creation time in `run.json`, the age
+trigger has no baseline: treat the epic as more than a day old.
 
 With `--write-back=off` there is no durable record that an issue was completed, so
 resumability genuinely degrades. Say so rather than pretending otherwise.
