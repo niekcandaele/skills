@@ -6,7 +6,7 @@ description: >
   ready, or request review. Handles branch creation, commits, pushes, provider
   binding, and labels. Use whenever creating or updating a PR/MR; callers such as
   player-coach can supply implementation journey and friction context.
-argument-hint: "[PR title] [--context=path] [--no-push] [--base=<branch>] [--pr=<reference>] [--plan-file=<path>] [--inspect|--draft|--push|--ready|--merge] [--head-sha=<sha>] [--reviewer=<handle>]"
+argument-hint: "[PR title] [--context=path] [--no-push] [--base=<branch>] [--pr=<reference>] [--plan-file=<path>] [--inspect|--draft|--push|--ready|--merge] [--head-sha=<sha>] [--merge-method=merge] [--reviewer=<handle>]"
 metadata:
   group: ship
 ---
@@ -34,6 +34,10 @@ Parse `$ARGUMENTS` for:
 - `--merge` — merge an existing ready change at the exact `--head-sha` using the
   repository-approved method, then confirm merged state.
 - `--head-sha=<sha>` — full expected head required by `--ready` and `--merge`.
+- `--merge-method=merge` — caller-required method for `--merge`: the head's commits land
+  unsquashed and unrebased, so the merged history keeps every parent. A caller merging one
+  branch into another long-lived branch needs this, because a squash drops the source's
+  ancestry.
 - `--inspect` — read `--pr` or the current branch's unambiguous PR/MR state without
   mutation.
 - `--reviewer=<handle>` — request review after `--ready` when the handle is distinct from
@@ -41,7 +45,8 @@ Parse `$ARGUMENTS` for:
 
 `--inspect`, `--draft`, `--push`, `--ready`, and `--merge` select distinct paths. Reject
 combinations of more than one. `--reviewer` is valid only with `--ready`; `--head-sha` is
-valid and required with `--ready` and `--merge`.
+valid and required with `--ready` and `--merge`. `--merge-method` is valid only with
+`--merge`.
 Reject `--no-push` when no existing PR/MR can be inspected.
 
 ## Phase 0: Resolve the forge binding
@@ -142,7 +147,9 @@ Then return Phase 6 and stop.
 
 Require `--pr`, a full `--head-sha`, and an existing change observed as ready and
 mergeable. Require
-its remote head to equal the supplied SHA. Resolve the repository-approved merge method
+its remote head to equal the supplied SHA. With `--merge-method=merge`, the caller's
+method is the rule: use it when `merge-policy` reports the provider allows it, and fail
+before merging when it does not. Otherwise resolve the repository-approved merge method
 through `merge-policy`, failing on ambiguity rather than defaulting to squash. Without
 bypassing branch protection or approval rules, invoke the binding's `merge`
 operation through `create-pr`, then inspect again. Return `PR_STATE: merged` only when
