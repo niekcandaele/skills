@@ -4,8 +4,9 @@ description: >
   Run comprehensive triage-first verification pipeline with specialized skills.
   Detects scope, discovers toolchain, triages files to relevant skills, runs static
   analysis, invokes review skills in parallel, exercises the app, and produces a
-  unified report. Supports interactive, report-only, and auto-fix modes.
-argument-hint: "[--depth=light|deep] [--mode=interactive|report-only|auto-fix] [--scope=staged|unstaged|branch|all] [--base=<ref>] [--files=file1,file2] [--module=path] [--skip-ux] [--skip-visual] [--auto-fix-threshold=N] [--format=markdown|json] [--output=<path>] [--plan-file=<path>] [--epic-context=<path>]"
+  unified report. By default it then fixes the findings it judges worth fixing;
+  report-only mode stops at the report.
+argument-hint: "[--depth=light|deep] [--mode=fix|report-only] [--scope=staged|unstaged|branch|all] [--base=<ref>] [--files=file1,file2] [--module=path] [--skip-ux] [--skip-visual] [--format=markdown|json] [--output=<path>] [--plan-file=<path>] [--epic-context=<path>]"
 metadata:
   group: quality
   requires: [reviewer, codex-reviewer, comment-review, qa, tester, ux-reviewer, visual-verify, static-analysis, exerciser, debugger]
@@ -22,9 +23,12 @@ Run comprehensive verification before considering changes complete. This skill d
 Parse `$ARGUMENTS` for:
 
 **Mode** (`--mode=`):
-- `interactive` (default): Full pipeline → report → interactive triage → plan → fix
+- `fix` (default): Full pipeline → report → decide what is worth fixing → plan → fix → STOP
 - `report-only`: Full pipeline → report → STOP
-- `auto-fix`: Full pipeline → report → auto-accept severity >= threshold → plan → fix → STOP
+
+`--mode=interactive`, `--mode=auto-fix`, and `--auto-fix-threshold` no longer exist. Reject
+them as argument errors: a caller passing them expects per-issue questions or a severity
+cutoff, and silently getting judgement-based fixing instead would surprise it.
 
 **Depth** (`--depth=`):
 - `light` (default): one independent judgement review plus empirical evidence
@@ -79,7 +83,6 @@ it on your behalf.
   suppressed something that was never going to run. Reject it as an argument error rather than
   treating it as a no-op.
 - `--skip-visual`: Skip visual review for changes the human has already eyeballed (e.g. copy-only). Valid at both depths: at deep it skips `visual-verify`, at light it suppresses the exerciser's visual lens. Visual review is also auto-skipped when `visual-verify` is not among the available skills (defensive — it is normally installed globally, and a project may shadow it with its own copy to customize capture conventions).
-- `--auto-fix-threshold=N`: Minimum severity for auto-fix mode (default: 3)
 - `--plan-file=<path>`: Explicit path to a plan file for completeness checking. If not provided, discover the plan from context — check if a plan is visible in conversation history (e.g., invoked from player-coach which read a plan, or a plan was created/discussed earlier in this session). If a plan is found from either source, resolve its contents for the plan completeness check in Phase 6.
 
 **Carry-forward across verification runs:**
@@ -802,8 +805,7 @@ For `visual-verify`, also collect skill status if no findings were produced:
 - `SKIPPED` with reason (`NO_UI_FILES_IN_SCOPE`, `NO_RUNNING_APP_DISCOVERABLE`, `NO_SCREENSHOT_MECHANISM`). SKIPPED is expected behavior, not a warning — it just means there was nothing visual in scope.
 
 **Codex BLOCKED handling:** If `codex-reviewer` reports BLOCKED, this is a significant event — the independent second-model review did not run. Flag it prominently in the report:
-- In `report-only` mode: Include BLOCKED status with high visibility in the Agent Results Summary and add a prominent warning after the summary table.
-- In `interactive` mode: Use `AskUserQuestion` to ask: "Codex review was BLOCKED ({reason}). Continue without Codex review, or stop to resolve?"
+Include BLOCKED status with high visibility in the Agent Results Summary and add a prominent warning after the summary table, in every mode. Continue without asking.
 - `SKIPPED_UNSUPPORTED_SCOPE` is expected for `--scope=all` and is not flagged as a warning.
 
 ### 7b. Conditional: debugger
@@ -892,7 +894,7 @@ status cannot be PASSED — use FAILED instead.
 ```
 
 **Handle exerciser barriers:**
-- If BLOCKED with `LOGIN_REQUIRED`, `UNCLEAR_FEATURE`, `NO_EXERCISE_STRATEGY`, `NO_ENGINEER_SKILL`, or `SERVICE_UNAVAILABLE` (interactive/auto-fix modes only):
+- If BLOCKED with `LOGIN_REQUIRED`, `UNCLEAR_FEATURE`, `NO_EXERCISE_STRATEGY`, `NO_ENGINEER_SKILL`, or `SERVICE_UNAVAILABLE` (fix mode only — this is the one question verify asks, because only the human can supply the missing access):
   1. Use `AskUserQuestion` to get help from the user
   2. Re-invoke exerciser with the user's response
   3. If still blocked, record as final BLOCKED status
@@ -1238,64 +1240,45 @@ Output the report and return control to the caller. Do not triage, plan, or fix 
 **Otherwise (default markdown):**
 - The markdown report is the only output
 
-### Mode: `interactive` (default)
+### Mode: `fix` (default)
 
-After presenting the report, run interactive triage:
+After presenting the report, decide what is **worth fixing**, then fix it. Ask the human
+nothing — the report is the evidence, and the decision is yours.
 
-**If zero issues found:** Output the report and return. No triage needed.
+**If zero issues found:** Output the report and return.
 
-**Interactive Triage Process:**
+**1. Decide.** Give every VI a verdict, Fix or Leave. There is no severity cutoff; weigh
+the findings as a whole against what this change is for:
 
-1. Present ALL issues in batches of up to 4 using `AskUserQuestion`
-2. Issues sorted by descending severity (most severe first)
-3. For each issue: read source file, generate 2-3 specific fix proposals + Explain + Skip
-4. Record user decisions
+- **Severity** — how much harm the issue does if it ships.
+- **Confidence** — several sources agreeing, an exerciser `CONFIRMED`, a failing test all
+  raise it; `NOT REPRODUCED` lowers it.
+- **Clusters** — many moderate findings in one area usually share a root cause. Twenty
+  severity-6 findings can outweigh one severity-8, and the fix is the root cause, not
+  twenty patches. One critical finding is reason enough on its own.
+- **The goal** — the plan, the epic context, and the scope say what this change is for.
+  Work that belongs to a different change is Leave, with that change named.
+- **Fix cost** — every fix is new surface for the next review (see the depth rationale in
+  Phase 0). Favour fixes that shrink or simplify; a fix larger than its finding is a
+  candidate for Leave.
 
-**AskUserQuestion Format (batch of up to 4):**
+Always Fix: failing tests, broken build or typecheck, failed custom gates, and the
+`security` class. `comment-review` findings carry their deliberate severity floor into
+this weighing (see Phase 8a).
 
-```
-AskUserQuestion:
-  questions:
-    - header: "VI-1"
-      question: "{Title} — {Description}. Found at {file:line} by: {sources} (severity {N})"
-      multiSelect: false
-      options:
-        - label: "{Fix option 1}"
-          description: "{Specific action with file:line reference}"
-        - label: "{Fix option 2}"
-          description: "{Alternative action with file:line reference}"
-        - label: "Explain"
-          description: "Get the full picture before deciding"
-        - label: "Skip"
-          description: "Accept this issue — will not fix in this change set"
-```
+**2. Decision table.** Output one row per VI: ID, verdict, one-line reason. Every Leave
+is visible here, so a wrong call can be corrected.
 
-**Handling "Explain":** Read surrounding code, re-present with richer context (alone, not batched). Keep all fix options. If Explain again, dig deeper.
+**3. Plan.** Read the files the Fix verdicts touch. Write one plan that groups fixes by
+root cause, orders them by dependency, and drops any fix another fix makes redundant.
+Output it, then go straight on — no plan-approval step.
 
-**CRITICAL: Present EVERY issue.** Never skip issues. Only stop early if the user explicitly says "stop", "done", or "skip the rest".
+**4. Fix.** Apply the plan in order. Then rerun the `TOOLCHAIN` test and lint commands
+covering the changed files; fixing is done when they are green.
 
-5. After all issues triaged, show triage decision summary table
-6. If fixes to apply:
-   - Call `EnterPlanMode`
-   - Read ALL affected files, analyze dependencies between fixes
-   - Write implementation plan to plan file
-   - Call `ExitPlanMode` for approval
-7. Execute approved fixes in planned order
-8. Show completion summary
-9. Return control to caller — do not auto-re-run verify or commit
+**5. Summarize.** What was fixed, what was left and why, anything still red.
 
-### Mode: `auto-fix`
-
-After presenting the report:
-
-1. Auto-accept all issues with severity >= `--auto-fix-threshold` (default: 3)
-2. Skip issues below threshold (noted in summary but not acted on)
-3. No user prompts — do not use `AskUserQuestion`
-4. Enter plan mode, analyze fixes, write plan
-5. Execute fixes
-6. Show completion summary
-7. Return control (do NOT stop — the caller continues)
-8. Do NOT commit
+**6. Return control.** Do not re-run verify. Do not commit.
 
 ## CRITICAL: No Hiding Issues
 
@@ -1304,7 +1287,7 @@ The report must be brutally honest:
 - Tests should ALWAYS pass — 100% pass rate is the only acceptable outcome
 - Tests should ALWAYS be able to run — any setup/environment issue is a bug
 - Be transparent — show ALL issues prominently
-- Report facts — let humans decide what to act on
+- Report facts — every finding appears in the report, including the ones fix mode leaves
 
 ### Severity Scale (1-10)
 
@@ -1316,7 +1299,7 @@ The report must be brutally honest:
 | 3-4 | Low | Minor issues, slight inconvenience |
 | 1-2 | Trivial | Polish, cosmetic, optional improvements |
 
-Severity reflects "how big is this issue?" — NOT "must you fix it?" The human decides what to act on.
+Severity reflects "how big is this issue?" — NOT "must you fix it?" Fix mode weighs it alongside confidence, clusters, the goal, and fix cost; it is not a cutoff.
 
 ## Context Window Discipline
 
@@ -1325,7 +1308,7 @@ This is critical since verify runs in the main context window.
 - **Orchestrator stays lean**: Parse args, run git commands, apply triage, invoke skills, collect structured results, format report. No file reading beyond scope detection.
 - **Skills do the heavy work**: Each helper skill has its own context window. They read files, grep, investigate.
 - **Structured extraction only**: When collecting skill results, extract ONLY: title, severity, location, category, description. Discard investigation narratives.
-- **No full file reads in orchestrator**: Never read source files except during the fix execution phase (interactive/auto-fix modes).
+- **No full file reads in orchestrator**: Never read source files except during the fix execution phase (fix mode).
 - **Compact context bundle**: Scope + static summary + diff stat. ~50-100 lines max.
 
 ## Harness bindings
@@ -1346,8 +1329,7 @@ fail loudly — it quietly takes whichever fallback the skill offers.
 | Read-only exploration sub-agent (Phase 3) | the `Explore` agent type | `spawn_agent` with a read-only sandbox |
 | Hand a sub-agent a specific skill | the `Skill` tool by name | name the skill's `SKILL.md` absolute path in the spawned agent's message; the session's skill inventory lists that path |
 | Choose a model or effort per sub-agent | `model` on the call, or the skill's frontmatter | `model` / `reasoning_effort` on `spawn_agent` |
-| Ask the human a question (Phase 7c, Phase 9) | `AskUserQuestion` | a final-channel question; with no human attached, run `--mode=report-only` instead |
-| Enter and exit a reviewed plan before fixing | `EnterPlanMode` / `ExitPlanMode` | present the plan in the final channel and wait for the reply |
+| Ask the human a question (Phase 7c exerciser barriers) | `AskUserQuestion` | a final-channel question; with no human attached, run `--mode=report-only` instead |
 | Write the JSON report to a path | the `Write` tool | `apply_patch`, or a shell redirect |
 
 **A cap below the number of applicable skills is a configuration problem, not a
