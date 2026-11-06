@@ -58,11 +58,9 @@ Detection checklist:
 |----------|-----------------|
 | Design adherence | Component structure, data model, technical approach, security approach match the design doc |
 | Requirements gaps | Features missing from design, partial implementations, hardcoded stubs, changed behavior from spec |
-| Gold-plating | Features beyond design scope, YAGNI violations, "flexible" code for unplanned scenarios |
-| Over-engineering | Interfaces with single implementation, abstract factories for simple cases, layered architecture for CRUD |
+| Gold-plating | Features beyond design scope |
 | Structural completeness | Route added → service updated → model changed → tests added; removed feature → all references cleaned up |
 | Test suite integrity | `.skip`, `.only`, `xit`, commented-out assertions, `expect(true).toBe(true)`, empty catch in tests |
-| Dependency hygiene | Added but unused deps, removed features still have deps, dev deps in prod, "just in case" deps |
 | Legacy/dead code | Replaced functions not deleted, commented-out blocks, orphaned imports/configs/tests, stale TODOs now resolvable |
 | Documentation sync | README, AGENTS.md / CLAUDE.md, API docs, and any agent instruction files match current behavior |
 | AI slop — code | Generic names (`result`, `data`, `temp`, `handler`, `manager`), obvious comments, over-defensive null checks, verbose trace logging, copy-paste tutorial code |
@@ -71,53 +69,13 @@ Detection checklist:
 **Severity guidance:**
 - Design deviation / security vulnerability: 9-10
 - Gold-plating / missing required feature: 7-8
-- Over-engineering / test neutered: 5-7
+- Test neutered: 5-7
 - Documentation drift / dead code: 3-5
 - AI slop phrases / cosmetic: 1-4
 
-#### The over-engineering lens: find what to delete
-
-The best outcome for a diff is getting shorter. When evaluating the over-engineering,
-gold-plating, dependency-hygiene, and dead-code rows above, work this lens deliberately —
-it is easy to review only for what is *missing* and never for what should be *cut*.
-
-Tag every over-engineering finding with what kind of weight it removes:
-
-- `delete:` dead code, unused flexibility, speculative feature. Replacement: nothing.
-- `stdlib:` hand-rolled thing the standard library ships. Name the function.
-- `native:` dependency or code doing what the platform already does. Name the feature.
-- `yagni:` abstraction with one implementation, config nobody sets, layer with one caller.
-- `shrink:` same logic, fewer lines. Show the shorter form.
-
-**Style: terse and concrete.** Location, what to cut, what replaces it. Never vague
-"might be more complex than necessary" prose.
-
-❌ "This EmailValidator class might be more complex than necessary, have you considered
-whether all these validation rules are needed at this stage?"
-
-✅ `L12-38: stdlib: 27-line validator class. "@" in email, 1 line, real validation is the confirmation mail.`
-
-✅ `L4: native: moment.js imported for one format call. Intl.DateTimeFormat, 0 deps.`
-
-✅ `repo.py:L88: yagni: AbstractRepository with one implementation. Inline it until a second one exists.`
-
-✅ `L52-71: delete: retry wrapper around an idempotent local call. Nothing replaces it.`
-
-✅ `L30-44: shrink: manual loop builds dict. dict(zip(keys, values)), 1 line.`
-
-**Reuse verification — required before flagging.** You review real files, not an abstract
-diff. Verify every proposed replacement actually exists:
-- `stdlib:` — confirm the standard-library function is real and does the job.
-- `native:` — confirm the platform feature (or existing dependency) covers the case.
-- `yagni:`/`shrink:`/`delete:` — grep the codebase for the helper you'd inline to, or
-  confirm nothing else depends on the flexibility you'd remove.
-
-A finding whose replacement doesn't exist is noise. Drop it.
-
-**Never flag the minimum smoke test.** A single smoke test or `assert`-based self-check is
-the floor, not bloat. Never propose deleting it.
-
-Zero over-engineering findings is a success, not a gap — a lean diff is the happy path.
+Over-engineering is `ponytail-review`'s lens: speculative abstractions, reinvented
+stdlib, unneeded dependencies, dead flexibility, and code that should be shorter. Leave
+those findings to it, so each one is reported once.
 
 ### Dimension 2: Architecture
 
@@ -416,10 +374,6 @@ Each issue uses this format:
 1. [Sev X] [Short title] — [file:line]
 2. [Sev X] [Short title] — [file:line]
 3. [Sev X] [Short title] — [file:line]
-
-**Over-engineering metric:**
-[If there is something to cut: `net: -N lines possible.`]
-[If there is nothing to cut: `Lean already. Ship.`]
 ```
 
 ## Severity Scale
@@ -442,7 +396,6 @@ Each issue uses this format:
 - **Enumerate then check (hardening)** — List all input/state/entry-point scenarios first, then check each
 - **Research patterns first (security)** — Understand how auth/authz/tenant isolation works before flagging deviations
 - **Count before flagging (architecture)** — Three occurrences minimum for "duplication"; check both directions of imports
-- **Verify the replacement exists (over-engineering)** — Grep for the helper, confirm the stdlib function is real, before proposing a cut. An unverified replacement is noise
 - **Be framework-aware** — Don't flag concerns the ORM, framework, or middleware demonstrably handles
 
 ## STOP — Never Fix

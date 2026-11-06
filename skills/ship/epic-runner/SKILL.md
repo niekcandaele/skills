@@ -54,8 +54,8 @@ epic-runner            you — the scheduler
 ├── delivery-agent     every forge call and tracker mutation the schedule needs — CI
 │                      proof, merge, PR state, lifecycle — returned as fixed fields
 └── epic-verify-agent  one per finalization round, holds the full report so you don't
-    └── verify → reviewer, codex-reviewer, comment-review, qa, ux-reviewer,
-                 static-analysis, tester, exerciser, visual-verify
+    └── verify → reviewer, codex-reviewer, comment-review, ponytail-review, qa,
+                 ux-reviewer, static-analysis, tester, exerciser, visual-verify
 ```
 
 Everything below the first line already exists and is already isolated. Your job is to
@@ -1162,7 +1162,7 @@ another harness, swap this section and leave everything else alone.
 **If the harness caps concurrent sub-agents, that cap is yours to get right**, because it
 is a property of the outermost invocation and this skill is the outermost invocation. It has
 to accommodate the deepest point of the tree, not the widest: in Phase 2, `verify` fans out
-to nine sub-agents while two ancestors — this scheduler and the epic-verify agent — are still
+to ten sub-agents while two ancestors — this scheduler and the epic-verify agent — are still
 active. A cap sized for what any one layer wants leaves the bottom layer with nothing, and
 the symptom is not an error but a review pipeline that quietly runs one reviewer at a time.
 

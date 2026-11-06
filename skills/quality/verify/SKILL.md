@@ -9,7 +9,7 @@ description: >
 argument-hint: "[--depth=light|deep] [--mode=fix|report-only] [--scope=staged|unstaged|branch|all] [--base=<ref>] [--files=file1,file2] [--module=path] [--skip-ux] [--skip-visual] [--format=markdown|json] [--output=<path>] [--plan-file=<path>] [--epic-context=<path>]"
 metadata:
   group: quality
-  requires: [reviewer, codex-reviewer, comment-review, qa, tester, ux-reviewer, visual-verify, static-analysis, exerciser, debugger]
+  requires: [reviewer, codex-reviewer, comment-review, ponytail-review, qa, tester, ux-reviewer, visual-verify, static-analysis, exerciser, debugger]
 ---
 
 # Verify Changes — Triage-First Pipeline
@@ -31,7 +31,7 @@ them as argument errors: a caller passing them expects per-issue questions or a 
 cutoff, and silently getting judgement-based fixing instead would surprise it.
 
 **Depth** (`--depth=`):
-- `light` (default): one independent judgement review plus empirical evidence
+- `light` (default): one independent judgement review, the lean pass, and empirical evidence
 - `deep`: the full judgement fan-out
 
 **Composition** — what the pipeline runs, by depth:
@@ -40,6 +40,7 @@ cutoff, and silently getting judgement-based fixing instead would surprise it.
 |---|---|---|
 | Triage (Phase 3) | Job A only | Job A + Job B |
 | Judgement review | **one**: `codex-reviewer`, or `reviewer` when Codex is unavailable | `reviewer`, `codex-reviewer`, `comment-review`, `qa`, `ux-reviewer` |
+| Lean pass | `ponytail-review` | `ponytail-review` |
 | Deterministic | `static-analysis`, `tester` | `static-analysis`, `tester` |
 | Empirical | `exerciser`, carrying its own visual lens | `exerciser`, plus `visual-verify` when triage gates it in |
 | Diagnostic | `debugger` on failure | `debugger` on failure |
@@ -49,11 +50,14 @@ This table is the single source of truth for composition; callers point here rat
 restating it.
 
 **The two depths are different bets, not different amounts of the same bet.** Deep buys more
-lenses on one diff: five reviewers, each with its own specialism, each free to open a line of
+lenses on one diff: five reviewers plus the lean pass, each with its own specialism, each free to open a line of
 inquiry the others would miss. Light buys model diversity and empirical evidence instead: one
 review from a genuinely different model where the machine has one, plus starting the
 application and actually using the feature. Both keep the checks that cannot wander — a
 linter and a test runner report what came back and never widen their own remit.
+
+Both also keep the lean pass, `ponytail-review`: its fixes shrink the diff, so it converges
+where stacked reviewers do not, and its severity cap keeps it from blocking a change alone.
 
 Light is the default because the caller is usually a model that has already reviewed and
 tested its own work. Stacking five more judgement reviewers on top of that does not converge:
@@ -354,10 +358,11 @@ Read each changed file (not just the extension — look at actual content).
 ALWAYS-ON SKILLS — these run on every verification, no exceptions.
 Assign each the full scoped file list.
 
-- reviewer          Business logic, architecture, patterns, security, robustness,
-                    over-engineering. Needs breadth across the whole diff.
+- reviewer          Business logic, architecture, patterns, security, robustness.
+                    Needs breadth across the whole diff.
 - codex-reviewer    General second-opinion pass, not a specialist router target.
 - comment-review    Comment rot, verbose rationale, and comment density can appear in any changed file.
+- ponytail-review   Over-engineering and reuse hunting needs breadth across the whole diff.
 - qa                Test coverage assessment for everything that changed.
 - tester            Any code change could affect tests.
 
@@ -394,6 +399,7 @@ Output a JSON-like mapping:
     "reviewer": ["all scoped files"],
     "codex-reviewer": ["all scoped files"],
     "comment-review": ["all scoped files"],
+    "ponytail-review": ["all scoped files"],
     "qa": ["all scoped files"],
     "tester": ["all"],
     "ux-reviewer": ["UI/CLI/user-facing files"],
@@ -518,13 +524,13 @@ and 43 s once the cap was raised, with no change to these instructions.
 
 ### At `--depth=deep`
 
-**Always run, every time:** `reviewer`, `codex-reviewer`, `comment-review`, `qa`, `tester`. Triage focuses these with file assignments but never suppresses them — for correctness-facing review, a missed regression costs more than an extra skill run.
+**Always run, every time:** `reviewer`, `codex-reviewer`, `comment-review`, `ponytail-review`, `qa`, `tester`. Triage focuses these with file assignments but never suppresses them — for correctness-facing review, a missed regression costs more than an extra skill run.
 
 **Run if triage says they apply:** `ux-reviewer` and `visual-verify` (see Phase 3 Job B gating). `--skip-ux` / `--skip-visual` override triage and force a skip.
 
 ### At `--depth=light` (default)
 
-**Always run, every time:** `tester`, and exactly **one** judgement reviewer chosen like this:
+**Always run, every time:** `tester`, `ponytail-review`, and exactly **one** judgement reviewer chosen like this:
 
 ```bash
 which codex
@@ -554,9 +560,9 @@ depends on how gnarly the change is, and only the orchestrator knows that. What
 each skill needs, as a rough cost signal:
 
 - **Most capable model** — `reviewer`. Comprehensive review across design,
-  architecture, coherence, hardening, security, and over-engineering. This is the one
+  architecture, coherence, hardening, and security. This is the one
   that benefits most from raw capability.
-- **General-purpose model** — `codex-reviewer`, `comment-review`, `qa`,
+- **General-purpose model** — `codex-reviewer`, `comment-review`, `ponytail-review`, `qa`,
   `ux-reviewer`, `exerciser`, `visual-verify`. Judgment calls, but bounded ones.
 - **Fast, cheap model** — `tester`, `static-analysis`. These run commands and
   report what came back; they are not asked to reason about the result.
@@ -573,7 +579,7 @@ For `codex-reviewer`, `SCOPE_METADATA` is authoritative. It must not infer scope
 ### Carry-forward rules (only when `--ledger` was supplied without `--no-carry-forward`)
 
 Append this to the prompt of the **judgment** reviewers — `reviewer`, `codex-reviewer`,
-`qa`, `comment-review`, `ux-reviewer`, `visual-verify`. Never to `tester`,
+`qa`, `comment-review`, `ponytail-review`, `ux-reviewer`, `visual-verify`. Never to `tester`,
 `static-analysis`, or `exerciser`: those run commands and report what came back, and a
 machine does not drift the way a fresh reader does.
 
@@ -645,7 +651,7 @@ OUTPUT FORMAT: For each issue found, provide:
 **reviewer:**
 ```
 Comprehensive review across all five dimensions:
-1. Design & Code Quality: design adherence, over-engineering, AI slop, test integrity, structural completeness
+1. Design & Code Quality: design adherence, gold-plating, AI slop, test integrity, structural completeness
 2. Architecture: module boundaries, dependency direction, god objects, abstraction opportunities, coupling
 3. Coherence: reinvented wheels, pattern violations, convention mismatches, documentation drift, dead code
 4. Hardening: invalid inputs, error paths, inconsistent validation, orphaned references, state transitions
@@ -653,11 +659,6 @@ Comprehensive review across all five dimensions:
 
 Research the project's structure, patterns, and security approach BEFORE evaluating changes.
 Focus on: 'Is this change well-designed, structurally sound, pattern-consistent, robust, and secure?'
-
-Work the over-engineering lens in Dimension 1 deliberately — it is easy to review only
-for what is missing and never for what should be cut. Tag those findings
-(delete / stdlib / native / yagni / shrink), verify each proposed replacement actually
-exists before reporting it, and close the report with the net-lines metric.
 ```
 
 **codex-reviewer:**
@@ -689,6 +690,18 @@ Code correctness, design, and prose docs are out of scope — other skills own t
 Normalize findings into: title, severity (floor 5, cap 6 — the floor is deliberate),
 location, category (tag), description including a concrete rewrite (or "delete").
 If comments are clean, report COMPLETED with zero findings.
+```
+
+**ponytail-review:**
+```
+Review the scoped diff for over-engineering ONLY: dead flexibility, reinvented stdlib,
+unneeded dependencies, helpers the repo already has, speculative abstractions,
+near-copies, functions mixing unrelated jobs, shrinkable logic.
+Correctness, security, and performance are out of scope — other skills own those.
+Verify each proposed replacement actually exists (grep for the codebase helper,
+confirm the stdlib/native feature) before reporting it.
+Normalize findings into: title, severity (cap 5), location, category (tag), description.
+If nothing to cut, report COMPLETED with zero findings ("Lean already. Ship.").
 ```
 
 **tester:**
@@ -948,9 +961,10 @@ bias the floor exists to cancel.
 
 ## Triage Summary
 
-**Skills run:** reviewer, codex-reviewer, comment-review, tester, qa, ux-reviewer, visual-verify, exerciser
+**Skills run:** reviewer, codex-reviewer, comment-review, ponytail-review, tester, qa, ux-reviewer, visual-verify, exerciser
 **Skills skipped:** [none, or each skipped skill with its reason — `visual-verify (gated: no UI-rendering files in scope)`, `ux-reviewer (--skip-ux)`, `visual-verify (not present in available skills)`, `qa (not in light composition)`]
 **Judgement reviewer:** [at light: `codex-reviewer` or `reviewer (Codex unavailable)`; at deep: `all five`]
+**Lean pass:** [`ponytail-review` net metric — `net: -N lines possible.` or `Lean already. Ship.`]
 **Static analysis:** ESLint (3 findings), tsc (1 finding)
 
 A gated skip must always name its reason. A mis-gate is only correctable if it is visible in the report.
@@ -1113,17 +1127,19 @@ never add `endLine` there. Omit `findings[].location` when none applies and set
   "triage": {
     "skillsRun": [
       {"skill": "reviewer", "reason": "code files require correctness review"},
+      {"skill": "ponytail-review", "reason": "lean pass runs at every depth"},
       {"skill": "tester", "reason": "test command discovered"},
       {"skill": "exerciser", "reason": "user-visible flow changed"}
     ],
     "skillsSkipped": [
       {"skill": "visual-verify", "reason": "no UI-rendering files in scope"}
     ],
-    "skills_run": ["reviewer", "tester", "exerciser"],
+    "skills_run": ["reviewer", "ponytail-review", "tester", "exerciser"],
     "skills_skipped": ["visual-verify"]
   },
   "skillResults": [
     {"skill": "reviewer", "status": "COMPLETED", "notes": "Judgement reviewer at light depth (Codex unavailable). Found 1 item"},
+    {"skill": "ponytail-review", "status": "COMPLETED", "notes": "Lean already. Ship."},
     {"skill": "qa", "status": "SKIPPED", "notes": "not in light composition"},
     {"skill": "exerciser", "status": "PASSED", "notes": "Flow completed; visual lens active, 0 visual findings"}
   ],

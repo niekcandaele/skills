@@ -11,6 +11,7 @@
         "codex-reviewer",
         "thermo-nuclear-code-quality-review",
         "comment-review",
+        "ponytail-review",
         "qa",
         "ux-reviewer",
         "visual-verify",
@@ -30,7 +31,8 @@
         "review-pr",
         "renovator",
         "check-ci",
-        "resolving-merge-conflicts"
+        "resolving-merge-conflicts",
+        "ponytail"
       ]
     },
     {
