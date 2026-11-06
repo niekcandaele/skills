@@ -28,6 +28,14 @@ the review composes with this repo's verify pipeline. That repository ships no
 license file, so the credit line in the skill is the only notice travelling with
 it — check upstream terms before redistributing it further.
 
+The `ponytail` skill is vendored from
+[`DietrichGebert/ponytail`](https://github.com/DietrichGebert/ponytail), MIT
+licensed, with this repo's `metadata` frontmatter added. `ponytail-review` is
+derived from that repository's skill of the same name, narrowed to the lean lens
+and adapted to the verify pipeline's finding format. Upstream ships its own
+`ponytail-review` with a broader remit; installing both lets one overwrite the
+other.
+
 Everything else is original.
 
 The MIT license this repository ships under is the same license those skills
