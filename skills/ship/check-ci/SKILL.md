@@ -410,6 +410,9 @@ The `debugger` skill will:
 4. Gather evidence about environment and context
 5. Present findings without proposing fixes
 
+The debugger saves its captures to the branch's evidence store, per the `evidence` skill,
+so `create-pr` can show the failure and its resolution in the Testing Plan.
+
 ## Output Format
 
 The default watcher may show the human summaries below, but always finish with the exact

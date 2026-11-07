@@ -60,6 +60,26 @@ The synthesized narrative in the final PR body that explains player turns, verif
 friction, testing, and terminal state.
 _Avoid_: log, transcript, summary
 
+**Evidence store**:
+The per-branch directory, held outside the repository, where verification captures land so a PR can show them. Defined by the `evidence` skill.
+_Avoid_: artifacts dir, screenshot folder, scratch
+
+**Evidence entry**:
+One capture in the **Evidence store**: a claim, its files, the command that produced it, and the head SHA it ran against.
+_Avoid_: artifact, screenshot (a screenshot is one kind of entry)
+
+**Before capture**:
+The same view or command captured against the merge base, so a reviewer can compare it with the change. It is the default unless the feature is new.
+_Avoid_: baseline (verify already uses that for a pre-existing failure), snapshot
+
+**Fresh**:
+An **Evidence entry** whose head SHA equals the PR's head. Only fresh entries count as verified in a Testing Plan.
+_Avoid_: current, valid, up to date
+
+**Gap-fill**:
+The exerciser pass that runs while CI is running, covering only the Testing Plan checks that no fresh entry proves. `create-pr` runs it on its default path; `player-coach` runs it before marking a PR ready.
+_Avoid_: re-test, second pass
+
 **Dependency PR**:
 A pull or merge request opened by a dependency-update bot (Renovate, Dependabot, or similar), identified by its author and body structure.
 _Avoid_: bot PR, renovate PR (the term is bot-agnostic)
@@ -101,6 +121,13 @@ _Avoid_: suggestion, improvement, nice-to-have
 - A **Dependency PR** receives exactly one **Risk tier** and, per invocation, one **Verdict**
 - **Steering** can move a **Dependency PR** between **Risk tiers**; the generic default never does more than the tier allows
 - An **Opportunity** on a **Dependency PR** forces the **Verdict** to `commented`, whatever the **Risk tier**
+
+- An **Evidence store** belongs to one branch and holds many **Evidence entries**; capture
+  skills write entries, and only `create-pr` publishes them
+- A Testing Plan check is verified only by a **Fresh** entry; a stale entry is a hint for
+  **Gap-fill**, never proof
+- The **Evidence store** outlives a **Run**, because a later `create-pr` call still has to
+  read and publish what it holds
 
 ## Example dialogue
 
