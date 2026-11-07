@@ -6,10 +6,11 @@ description: >
   analysis, invokes review skills in parallel, exercises the app, and produces a
   unified report. By default it then fixes the findings it judges worth fixing;
   report-only mode stops at the report.
-argument-hint: "[--depth=light|deep] [--mode=fix|report-only] [--scope=staged|unstaged|branch|all] [--base=<ref>] [--files=file1,file2] [--module=path] [--skip-ux] [--skip-visual] [--format=markdown|json] [--output=<path>] [--plan-file=<path>] [--epic-context=<path>]"
+argument-hint: "[--depth=light|deep] [--mode=fix|report-only] [--scope=staged|unstaged|branch|all] [--base=<ref>] [--files=file1,file2] [--module=path] [--skip-ux] [--skip-visual] [--format=markdown|json] [--output=<path>] [--plan-file=<path>] [--epic-context=<path>] [--evidence-dir=<path>]"
 metadata:
   group: quality
   requires: [reviewer, codex-reviewer, comment-review, ponytail-review, qa, tester, ux-reviewer, visual-verify, static-analysis, exerciser, debugger]
+  optional: [evidence]
 ---
 
 # Verify Changes — Triage-First Pipeline
@@ -113,6 +114,10 @@ With no `--ledger`, verify behaves exactly as it always has, so it stays usable 
   through to the judgement reviewers. It exists so a reviewer can tell the difference between
   work that was forgotten and work that is scheduled, which is the distinction a reviewer
   looking at one issue of an epic has no way to make on its own.
+
+**Evidence:**
+
+- `--evidence-dir=<path>`: the evidence store to write to, overriding the path the `evidence` skill derives from the checkout. Callers that run verify from another checkout pass it so the proof lands where `create-pr` will look.
 
 **Output Format:**
 - `--format=`: `markdown` (default) or `json`. When `json`, the report is serialized as a JSON object conforming to the adversary CLI schema (see Phase 8c)
@@ -270,6 +275,10 @@ SCOPE_METADATA:
 - included_files: src/auth/login.ts,src/auth/middleware.ts
 - excluded_files: ALL_OTHER_FILES (outside selected scope)
 ```
+
+**5. Resolve the Evidence Store:**
+
+Resolve the evidence store once, per the `evidence` skill, or take `--evidence-dir` when given, and record it as `EVIDENCE_DIR`. Every sub-skill that captures proof receives this path in Phase 7, so they all write to one store. Entry ids come back from them; the files stay on disk.
 
 ## Phase 2: Load Engineer Skill
 
@@ -707,6 +716,7 @@ If nothing to cut, report COMPLETED with zero findings ("Lean already. Ship.").
 **tester:**
 ```
 Run the full test suite using: {test command from TOOLCHAIN}
+EVIDENCE_DIR: {EVIDENCE_DIR} — save the run's output excerpt per the evidence skill and report its entry id.
 Report exact pass/fail counts.
 If tests cannot run, report what prevented execution.
 For EACH failure: title, severity, location, error message, and whether it's IN-SCOPE or OUT-OF-SCOPE.
@@ -718,6 +728,7 @@ ONLY test user-facing changes in the scoped files.
 Do not audit the entire UI/CLI for issues.
 Focus on the UX of what changed in this scope.
 Test any UI, CLI output, error messages, or API responses that were modified.
+EVIDENCE_DIR: {EVIDENCE_DIR} — save what you capture per the evidence skill and report entry ids.
 ```
 
 **qa:**
@@ -732,11 +743,12 @@ Focus on: 'Are these changes well-tested with good tests?'
 ```
 Read the engineer skill for screenshot mechanics (wrapper command, dev URLs, viewport conventions) — typically VISUAL.md or the engineer SKILL.md.
 For each UI-rendering file in YOUR ASSIGNED FILES, identify at least one route that renders it (grep imports for components; page files render directly).
+EVIDENCE_DIR: {EVIDENCE_DIR} — save screenshots per the evidence skill and report entry ids. Capture before evidence from {scope.mergeBase} for anything that existed before the change; brand-new features have no before.
 Take screenshots at desktop (1440-wide, full-page) AND mobile (390-wide, full-page). If responsive sizing changed, sample boundary widths too.
 Open every PNG with `Read` and apply the holistic articulation step described in the skill: write 2-3 sentences describing the composition in designer's terms (balance, weight, hierarchy, rhythm, alignment, density, color, typography). Anything in that paragraph that reads as a complaint becomes a finding.
 Focus on: 'Would a designer ship this?' — not 'is anything imperfect?'
 If no UI-rendering files in scope or no running app discoverable, return STATUS: SKIPPED with a one-line factual reason — same convention as codex-reviewer.
-Output structured findings (Title / Severity / Location / Category / Description) per the skill's reviewer-mode protocol.
+Output structured findings (Title / Severity / Location / Category / Description / evidence entry ids) per the skill's reviewer-mode protocol.
 ```
 
 ### Plan Completeness Check (Parallel, Conditional)
@@ -805,6 +817,7 @@ Collect structured findings from each skill. Extract ONLY:
 - Location (file:line)
 - Category (skill-specific)
 - Description
+- Evidence entry ids, when the skill captured any (ids only, never file contents)
 
 **Discard investigation narratives.** Keep the orchestrator context lean.
 
@@ -835,6 +848,8 @@ Invoke `debugger` with:
 VERIFICATION SCOPE CONTEXT:
 {SCOPE_CONTEXT}
 
+EVIDENCE_DIR: {EVIDENCE_DIR}
+
 FAILURES TO INVESTIGATE:
 {list of failures from tester/ux/exerciser}
 
@@ -848,6 +863,7 @@ Report, per failure:
   PRE_EXISTING: yes | no | undetermined
   COMMAND: <the exact command you ran>
   EVIDENCE: <output excerpt showing the same failure signature at the merge base>
+  EVIDENCE_ENTRY: <entry id for that merge-base output, saved per the evidence skill>
   TOUCHED_BY_DIFF: <paths in the failure's stack that appear in the scoped diff, or none>
 ```
 
@@ -877,6 +893,12 @@ Exercise the changes end-to-end:
 4. Verify data flows end-to-end — don't stop at "endpoint returns 200", follow data through the system
 5. Report whether the specific changes actually work with real data
 
+EVIDENCE_DIR: {EVIDENCE_DIR}
+Save what you observe per the evidence skill and report the entry ids with each result, including
+each issue verification and each custom gate. Capture before evidence from {scope.mergeBase} (a scratch
+worktree, started the same way) for anything that existed before the change; brand-new features
+have no before.
+
 If you hit a barrier (can't start, need credentials, unclear what to test, no engineer skill for complex backend):
 - Return BLOCKED status with specific reason
 - If you cannot determine HOW to exercise the change, that is severity 9-10
@@ -902,7 +924,7 @@ CUSTOM EXERCISER GATES:
 {List of exerciser gates from VERIFICATION.md}
 
 These are mandatory repo-maintainer-defined checks. After exercising the feature, you MUST
-check each gate and report PASS/FAIL with evidence. Any failing gate means your overall
+check each gate and report PASS/FAIL with evidence and entry ids. Any failing gate means your overall
 status cannot be PASSED — use FAILED instead.
 ```
 
@@ -1024,11 +1046,11 @@ correctable — a suppression nobody can see is only ever discovered by being wr
 
 ## Exerciser Verification
 
-| Issue ID | Title | Exerciser Status | Notes |
-|----------|-------|-----------------|-------|
-| VI-1 | [title] | CONFIRMED | [observation] |
-| VI-2 | [title] | NOT REPRODUCED | [what was tried] |
-| VI-3 | [title] | NOT APPLICABLE | [reason] |
+| Issue ID | Title | Exerciser Status | Notes | Evidence |
+|----------|-------|-----------------|-------|----------|
+| VI-1 | [title] | CONFIRMED | [observation] | exerciser-20261107T141502-a3f9 |
+| VI-2 | [title] | NOT REPRODUCED | [what was tried] | |
+| VI-3 | [title] | NOT APPLICABLE | [reason] | |
 
 ---
 
@@ -1037,9 +1059,9 @@ correctable — a suppression nobody can see is only ever discovered by being wr
 {If no VERIFICATION.md exists or no custom gates defined: omit this section entirely}
 
 ### Exerciser Gates
-| # | Rule | Status | Evidence |
-|---|------|--------|----------|
-| 1 | [rule from VERIFICATION.md] | PASS / FAIL / BLOCKED | [from exerciser report] |
+| # | Rule | Status | Evidence | Entries |
+|---|------|--------|----------|---------|
+| 1 | [rule from VERIFICATION.md] | PASS / FAIL / BLOCKED | [from exerciser report] | [entry ids] |
 
 ### Review Gates
 | # | Rule | Status | Checked By | Evidence |
@@ -1323,7 +1345,7 @@ This is critical since verify runs in the main context window.
 
 - **Orchestrator stays lean**: Parse args, run git commands, apply triage, invoke skills, collect structured results, format report. No file reading beyond scope detection.
 - **Skills do the heavy work**: Each helper skill has its own context window. They read files, grep, investigate.
-- **Structured extraction only**: When collecting skill results, extract ONLY: title, severity, location, category, description. Discard investigation narratives.
+- **Structured extraction only**: When collecting skill results, extract ONLY: title, severity, location, category, description, evidence entry ids. Discard investigation narratives.
 - **No full file reads in orchestrator**: Never read source files except during the fix execution phase (fix mode).
 - **Compact context bundle**: Scope + static summary + diff stat. ~50-100 lines max.
 

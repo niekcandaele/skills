@@ -341,8 +341,9 @@ plan and commit. The plan is your requirements document — you will not see the
 {state_dir}/epic-context.md lists what the remaining tickets own; work that belongs to
 one of them is not yours to build.
 
-Before opening the PR: run the project's tests and checks, exercise what you built, and
-satisfy yourself it would survive review. CI is the gate, not the first reader.
+Before opening the PR: run the project's tests and checks, exercise what you built, saving
+the screenshots and output to the branch's evidence store per the `evidence` skill so the
+PR's Testing Plan carries them, and satisfy yourself it would survive review. CI is the gate, not the first reader.
 
 /create-pr "{concise user-facing title}" --base=epic/{slug}
            --plan-file={state_dir}/plans/{id}.md --context={your journey context}
@@ -434,7 +435,8 @@ Branch epic-{slug}-sync-{n} from {BASE_REMOTE}/epic/{slug}, then git merge {TARG
 sides' intent, and invent nothing. {state_dir}/epic-context.md says what the epic is
 building. Commit the result as a merge commit; never rebase or squash it.
 
-Run the project's tests and checks; fix only what the merge broke.
+Run the project's tests and checks; fix only what the merge broke. Save their output to
+the branch's evidence store per the `evidence` skill.
 
 /create-pr "Sync {target} into epic/{slug}" --base=epic/{slug} --context={your journey context}
 
@@ -873,7 +875,7 @@ Spawn a verification agent. It holds the report so you don't:
 ```
 Verify the epic branch as one integrated change.
 
-Check out epic/{slug} and invoke:
+Check out epic/{slug} and invoke (its captures land in the epic branch's evidence store):
 /verify --depth=deep --mode=report-only --scope=branch --base={BASE_REMOTE}/{target}
         --format=json --output={state_dir}/epic-verify/{round}.json
 
@@ -936,9 +938,11 @@ one remediation through steps 2 and 3, and no return to step 1 — anything stil
 the human in the completion report.
 
 Write a context file from the run's own state — the per-issue outcomes, the verification
-result of each finalization round, and anything left blocking — then dispatch
+result of each finalization round, anything left blocking, the path of the epic branch's
+evidence store, and the merged issue PRs, each linked for its own evidence — then dispatch
 `OPEN_EPIC_PR` with `epic/{slug}`, `{target}`, and that path. The delivery-agent checks out
-`epic/{slug}` and opens the draft PR against `{target}`; `create-pr` opens the PR for the
+`epic/{slug}` and opens the draft PR against `{target}`, with `create-pr` building the
+Testing Plan from that store; `create-pr` opens the PR for the
 checked-out branch, so the checkout is what selects the head — which is why the epic branch
 is a parameter and not something the agent infers.
 

@@ -21,6 +21,7 @@ allowed-tools:
   - mcp__playwright__browser_install
 metadata:
   group: quality
+  optional: [evidence]
 ---
 
 You are the Visual Verifier. Your value is the one check no text-based reviewer
@@ -108,8 +109,16 @@ no browser exists. Never report `NO_SCREENSHOT_MECHANISM` preemptively.
 
 ## Step 3: Capture
 
-Save all screenshots to a `mktemp -d` directory with descriptive names:
-`{route-or-artifact-slug}-{width}.png`.
+Save screenshots to the evidence store's `files/` directory, named per the
+`evidence` skill, and write one entry per target and viewport, with the `claim`
+worded as the user-visible layout behavior. `$OUT_DIR` below is that `files/`
+directory, or a temporary directory when the `evidence` skill says there is no
+store.
+
+Capture a before shot too when the target existed at the merge base: render the
+same route (Tier 1) or the same artifact file from the merge-base worktree (Tiers
+2 and 3), as the `evidence` skill describes. A target that is new in this change
+gets `before: "new-feature"`.
 
 ### Tier 1 — Live web app (Playwright)
 
@@ -174,13 +183,13 @@ if [ -z "$CHROME" ] && npx playwright install chromium >/dev/null 2>&1; then
   cand="$(find "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" -maxdepth 6 -type f \( -name chrome -o -name 'chrome-headless-shell*' \) 2>/dev/null | sort -V | tail -1)"
   [ -n "$cand" ] && [ -x "$cand" ] && CHROME="$cand"
 fi
-TMP_PROFILE="$(mktemp -d)"
+TMP_PROFILE="$(mktemp -d)"   # throwaway Chrome profile; screenshots go to $OUT_DIR
 
 "$CHROME" --headless=new --disable-gpu --no-sandbox --hide-scrollbars \
   --window-size=1440,2400 --virtual-time-budget=10000 \
   --run-all-compositor-stages-before-draw \
   --user-data-dir="$TMP_PROFILE" \
-  --screenshot="$OUT_DIR/target-1440.png" "$URL_OR_FILE"
+  --screenshot="$OUT_DIR/target-1440-after.png" "$URL_OR_FILE"
 # repeat with --window-size=390,2400
 ```
 
@@ -315,10 +324,10 @@ fabricate a review you couldn't perform.
 COMPLETED
 
 ## Captures
-| Target | Viewport | Screenshot | Tier |
-|---|---|---|---|
-| /pricing | 1440 full-page | pricing-1440.png | playwright |
-| /pricing | 390 full-page | pricing-390.png | playwright |
+| Target | Viewport | Screenshot | Entry | Tier |
+|---|---|---|---|---|
+| /pricing | 1440 full-page | pricing-1440-a3f9-after.png | visual-verify-20261107T141502-a3f9 | playwright |
+| /pricing | 390 full-page | pricing-390-b71c-after.png | visual-verify-20261107T141502-b71c | playwright |
 
 ## Holistic Reads
 **/pricing @ 1440:** [the 2-3 sentence articulation]
@@ -328,11 +337,11 @@ COMPLETED
 
 ### overlap: plan-comparison dropdown renders underneath the sticky header
 **Severity:** 6
-**Location:** src/components/PlanSelector.tsx:1 (route /pricing, 390px, pricing-390.png)
+**Location:** src/components/PlanSelector.tsx:1 (route /pricing, 390px, pricing-390-b71c-after.png)
 **Category:** overlap
 **Description:** At 390px the opened plan dropdown is clipped by the sticky
 header — the first two options are hidden behind it, visible in
-pricing-390.png. A user cannot see which plan they are selecting. A designer
+pricing-390-b71c-after.png. A user cannot see which plan they are selecting. A designer
 would not ship a menu that opens underneath fixed chrome.
 ```
 
@@ -375,9 +384,9 @@ Scoped files are Astro pages; `just up` absent, `npm run dev` failed (port 4321 
 
 If you started the app, shut it down when done (`docker compose down`, kill
 the background dev-server process). If it was already running when you
-arrived, leave it exactly as you found it. Temp screenshot directories and
-Chrome profiles under `mktemp -d` clean themselves up with the session, but
-never leave a server running that you started.
+arrived, leave it exactly as you found it. Chrome profiles under `mktemp -d`
+clean themselves up with the session; the evidence store's screenshots stay.
+Never leave a server running that you started.
 
 ## What NOT To Do
 

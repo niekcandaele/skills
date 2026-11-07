@@ -26,6 +26,7 @@ A binding supplies these operations:
 | `ready` | Mark the existing draft ready without merging it. |
 | `reviewer` | Request review from a resolved handle distinct from the authenticated user. |
 | `labels` | List and apply only labels that already exist. |
+| `attach` | Upload evidence files so a description can embed them; return one embeddable URL per file, pinned so a later upload never changes or breaks an earlier one. |
 | `merge-policy` | Return provider-allowed merge methods and the repository's required/preferred method. |
 | `merge` | Merge the exact ready head with the repository's permitted method and confirm observed merged state; used only by an authorized caller such as `epic-runner`. |
 
@@ -33,7 +34,8 @@ A binding supplies these operations:
 `fetch-head` is conditionally required only when an inspected head is absent from the local
 object store and the selected path must render its diff. If the
 selected provider cannot perform a requested required operation, fail before mutating
-anything else in that invocation. `reviewer` is best-effort: a missing candidate or failed
+anything else in that invocation. `attach` is best-effort: a failed upload leaves that
+check with its text evidence and a note, never a failed PR. `reviewer` is best-effort: a missing candidate or failed
 assignment is reported but never reverses a successful ready transition.
 
 Resolve repository identity before any mutation. The selected change's base and head
@@ -137,6 +139,42 @@ gh -R "$BASE_REPOSITORY" pr view "$PR_NUMBER" \
 gh -R "$BASE_REPOSITORY" label list --json name --jq '.[].name'
 gh -R "$BASE_REPOSITORY" pr edit "$PR_NUMBER" --add-label "$LABEL"
 ```
+
+`attach` has no official GitHub upload API: a human paste uses a browser-session endpoint
+an agent cannot reach. Instead commit the files to a hidden ref on the head repository and
+embed them by commit SHA. The ref is not a branch, so it never shows in the branch list or
+a PR, and pinning by SHA keeps every earlier embed valid as the ref grows. A viewer who can
+read the repository sees the image; that is the same visibility a pasted attachment has.
+
+```bash
+# attach: STORE is the evidence store, CHANGE_KEY its change_key (see the evidence skill),
+# FILES the store-relative paths to upload
+EVIDENCE_REF="refs/uploads/evidence/$CHANGE_KEY"
+export GIT_INDEX_FILE="$(mktemp -d)/evidence.index"
+PARENT=$(git ls-remote "$PUSH_REMOTE" "$EVIDENCE_REF" | cut -f1)
+if [ -n "$PARENT" ]; then
+  git fetch "$PUSH_REMOTE" "$EVIDENCE_REF"
+  git read-tree "$PARENT"
+fi
+for f in "${FILES[@]}"; do
+  git update-index --add --cacheinfo "100644,$(git hash-object -w "$STORE/$f"),$f"
+done
+TREE=$(git write-tree)
+if [ -n "$PARENT" ]; then
+  COMMIT=$(git commit-tree "$TREE" -p "$PARENT" -m "evidence: $CHANGE_KEY")
+else
+  COMMIT=$(git commit-tree "$TREE" -m "evidence: $CHANGE_KEY")
+fi
+unset GIT_INDEX_FILE
+git push "$PUSH_REMOTE" "${COMMIT}:${EVIDENCE_REF}"   # braces: zsh reads $COMMIT:r as a modifier
+# embed URL for each file
+for f in "${FILES[@]}"; do
+  echo "https://$BASE_HOST/$HEAD_REPOSITORY_PATH/blob/$COMMIT/$f?raw=true"
+done
+```
+
+A rejected push means another upload moved the ref first: fetch it again and rebuild on
+the new tip. Leave the ref in place after merge, because the merged PR still embeds it.
 
 Use `gh pr view` again after `draft` or `ready` and confirm the expected `isDraft` value.
 A successful command with the wrong observed state is a failed operation.
@@ -256,6 +294,13 @@ glab -R "$BASE_REPOSITORY_SELECTOR" mr view "$MR_IID" --output json \
 # existing labels
 glab -R "$BASE_REPOSITORY_SELECTOR" label list --output json
 glab -R "$BASE_REPOSITORY_SELECTOR" mr update "$MR_IID" --label "$LABEL" --yes
+
+# attach: the project uploads API returns each file's project-relative URL
+for f in "${FILES[@]}"; do
+  UPLOAD_PATH=$(glab api --hostname "$BASE_HOST" -X POST "projects/$BASE_PROJECT_ID/uploads" \
+    -F "file=@$STORE/$f" | jq -er .full_path)
+  echo "https://$BASE_HOST$UPLOAD_PATH"
+done
 ```
 
 Inspect again after `draft` or `ready`; confirm the returned draft/work-in-progress state.

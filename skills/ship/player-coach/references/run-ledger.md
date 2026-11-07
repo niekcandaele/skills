@@ -46,7 +46,8 @@ Directory mode 0700, files 0600. Single writer: the coach. Write by creating
 `ledger.json.tmp` in the same directory, flushing it, and renaming over the target, so
 a crash never leaves a half-written ledger.
 
-Keep the directory after the run — it is the friction record the epic report wants.
+Keep the directory after the run — it is the friction record the epic report wants. The
+`evidence` store is a separate directory and is likewise kept.
 Prune directories untouched for 30 days at startup.
 
 ## The epic quarantine file
@@ -229,7 +230,7 @@ the decision is written down where a human can audit it afterwards.
 | Phase 1 step 3, as soon as the report is read | the verification-run record with `decision` and `gates` still null, *before* gates — so a crash mid-gate is recoverable |
 | Phase 1 step 4, after reconciliation | findings, dispositions, quarantine updates, coverage decisions |
 | Phase 1 step 5, once the decision is made | that run's `decision` and `gates`, and `carryForward` on an approving run |
-| Phase 3 | CI failures |
+| Phase 3 | CI failures; a failed Testing Plan check as an ordinary finding |
 | Phase 4 | the terminal status |
 
 ## Read protocol

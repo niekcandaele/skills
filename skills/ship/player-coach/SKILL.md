@@ -18,7 +18,7 @@ allowed-tools:
   - Skill
 metadata:
   group: ship
-  requires: [player, verify, create-pr, check-ci]
+  requires: [player, verify, create-pr, check-ci, exerciser, evidence]
 ---
 
 # Player–Coach: Adversarial Implementation Loop
@@ -190,7 +190,8 @@ Verification reports belong to the ledger, at `{ledger_dir}/reports/{n}.json`, b
 ledger's `reportPath` is the only surviving pointer to a run's evidence and must outlive the
 run. Use a unique mode-0700 temporary directory for everything else this run writes — the
 terminal context above all — giving each its own mode-0600 path so parallel runs never share
-a fixed filename, and delete that directory after terminal output.
+a fixed filename, and delete that directory after terminal output. The `evidence` store is
+not part of it: `create-pr` reads it later, so it outlives the run.
 
 Tell the user the plan summary, branch and exact target, budget, threshold, and whether CI
 is owned here or by the caller.
@@ -515,7 +516,8 @@ evidence, custom gates, and CI history. It must support these final PR sections:
 - Implementation journey with a player-turn table and concise narrative.
 - Friction log only when friction occurred.
 - Below-threshold issues only when present.
-- Testing plan hints from user-visible flows and exerciser evidence.
+- Testing plan hints from user-visible flows and exerciser evidence, plus the `evidence`
+  store directory, so `create-pr` embeds the proof verification already captured.
 - CI failures only when present.
 
 With `--no-ci`, invoke the default update path once:
@@ -558,7 +560,12 @@ one exact reading. Otherwise, before every watcher invocation, compute the remai
 seconds: if none remain, transition directly to `TURN_LIMIT_CI`; never pass zero or a
 negative `CI_CHECK_TIMEOUT`. With positive time remaining, invoke
 `/check-ci --pr={pr_url} {approved HEAD_SHA}` with `CI_CHECK_TIMEOUT` set to that value and
-continue after each result. Green
+continue after each result. Fill the
+Testing Plan's gaps alongside CI: before the first watcher invocation on an approved head,
+start the `exerciser` as a background sub-agent on the checks the final Testing Plan will
+carry (the plan's user-visible flows and edge cases, worded as those checks) that no fresh
+`evidence` entry covers yet, with the store as `--evidence-dir`. When every check already
+has a fresh entry, as on a resumed run, start nothing. Join it before `--ready`. Green
 requires `CI: PASSED`, the exact approved `HEAD_SHA`, `REQUIRED_CHECKS: complete`, any
 strict target policy satisfied, and `MERGEABLE: yes`.
 
@@ -571,6 +578,11 @@ strict target policy satisfied, and `MERGEABLE: yes`.
   `STRICT_POLICY: required` and `UP_TO_DATE: no` becomes
   CI-fix feedback: fetch the exact target and use a player turn to incorporate it.
 - `FAILED` enters the CI-fix player flow below.
+- A Testing Plan check that fails, whether during gap-fill or as `<n> failed` in a
+  `create-pr` `TESTING_PLAN:` line, is a blocking finding: record it in the ledger from the
+  exerciser's entry (`sources: ["exerciser"]`, `disposition: open`, severity at or above the
+  threshold) and route it through the CI-fix player flow below, so it passes verification
+  before `--ready`.
 - A reported head other than the approved SHA ends `FAILED_CI_BLOCKED`: the branch moved
   under the run, so no check result proves anything about the approved code.
 - `NONE` or `BLOCKED` ends `FAILED_CI_BLOCKED`; absence of affirmative proof is not green.

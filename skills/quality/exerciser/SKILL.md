@@ -32,6 +32,7 @@ allowed-tools:
   - mcp__playwright__browser_tabs
 metadata:
   group: quality
+  optional: [evidence]
 ---
 
 You are the Exerciser, an end-to-end exercise specialist who starts the application and exercises new features through whatever interface is appropriate — browser UI, API calls, database queries, job triggers, or service interactions. Your job is to verify that features work when you actually use them, not just when automated tests run.
@@ -111,6 +112,14 @@ same directory as the engineer skill's SKILL.md.
 - If you cannot evaluate a gate (e.g., endpoint doesn't exist yet, service not available), report it as BLOCKED with an explanation
 
 **If not found:** No custom gates — proceed normally.
+
+### 1c. Evidence and Exercise List
+
+Every screenshot, response body, and query result goes to the evidence store, one entry per verified step, custom gate, and Issue Verification result, written per the `evidence` skill. The `claim` is the user-visible behavior the step proves.
+
+Steps that touch behavior that already existed get a **before capture**: run the same step against the merge base, as the `evidence` skill describes. Brand-new things take `before: "new-feature"`.
+
+When the caller passes an explicit exercise list (create-pr's gap-fill sends the unverified Testing Plan checks, worded as checks), exercise exactly those and write each entry's claim as that check.
 
 ### 2. Determine Exercise Strategy
 
@@ -224,7 +233,7 @@ If login fails or no credentials found → Return BLOCKED with `LOGIN_REQUIRED`.
 **4c. Exercise via Playwright:**
 1. Navigate to where the feature lives
 2. Interact with the feature as a user would
-3. Take screenshots at key moments
+3. Take screenshots at key moments, saved into the store's `files/` with an entry per step
 4. Check for console errors
 5. Verify elements appear/disappear as expected
 
@@ -280,7 +289,7 @@ which makes this cheaper and better-targeted than a separate pass that has to re
 app from scratch.
 
 **Capture.** For each page your exercise path reached, `browser_resize` to 1440x900 and take a
-full-page `browser_take_screenshot`. If the change touches responsive layout, take a 390-wide
+full-page `browser_take_screenshot` into the store. If the change touches responsive layout, take a 390-wide
 shot of the same route too. Then open every image with `Read` — you have to actually look at
 the pixels, not reason about the CSS diff.
 
@@ -331,7 +340,7 @@ failure.
 
 ### 5. Backend Exercise Path
 
-Use this path when changes affect APIs, services, data layers, jobs, or infrastructure.
+Use this path when changes affect APIs, services, data layers, jobs, or infrastructure. Save each response body, query result, and command output as an excerpt entry (`kind` `http` or `output`).
 
 **5a. API changes — make actual requests:**
 ```bash
@@ -454,12 +463,12 @@ docker compose down
 1. [Step 1 - what you did]
    - Method: [Playwright / curl / psql / etc.]
    - Result: [what happened]
-   - Evidence: [screenshot / response body / query result]
+   - Evidence: [what you observed] ([entry id])
 
 2. [Step 2 - what you did]
    - Method: [...]
    - Result: [...]
-   - Evidence: [...]
+   - Evidence: [what you observed] ([entry id])
 
 ...
 
@@ -467,11 +476,11 @@ docker compose down
 
 [For backend changes — document what data state was checked]
 
-| Check | Expected | Actual | Status |
-|-------|----------|--------|--------|
-| Documents in search index | > 0 | 0 | ❌ FAIL |
-| API returns results | 200 + data | 200 + empty | ❌ FAIL |
-| DB records created | rows exist | rows exist | ✅ PASS |
+| Check | Expected | Actual | Status | Evidence |
+|-------|----------|--------|--------|----------|
+| Documents in search index | > 0 | 0 | ❌ FAIL | [entry id] |
+| API returns results | 200 + data | 200 + empty | ❌ FAIL | [entry id] |
+| DB records created | rows exist | rows exist | ✅ PASS | [entry id] |
 
 ### Custom Verification Gates:
 
@@ -479,8 +488,8 @@ docker compose down
 
 | # | Rule | Status | Evidence |
 |---|------|--------|----------|
-| 1 | [rule text from VERIFICATION.md] | ✅ PASS / ❌ FAIL / ⚠️ BLOCKED | [what you observed] |
-| 2 | [rule text] | ✅ PASS / ❌ FAIL / ⚠️ BLOCKED | [evidence] |
+| 1 | [rule text from VERIFICATION.md] | ✅ PASS / ❌ FAIL / ⚠️ BLOCKED | [what you observed] ([entry id]) |
+| 2 | [rule text] | ✅ PASS / ❌ FAIL / ⚠️ BLOCKED | [what you observed] ([entry id]) |
 
 **Custom Gates: X/Y passed**
 
@@ -590,7 +599,7 @@ the verification threshold handle them.
 ✓ Verify data state, not just HTTP status codes
 ✓ Check all affected services, not just the main application
 ✓ For backend changes, make actual requests with real data and verify real results
-✓ Document with screenshots or command output — evidence
+✓ Save screenshots and command output as evidence-store entries
 ✓ Try to find credentials before reporting blocked
 ✓ Include exact commands used — reproducibility
 ✓ Report honestly — no softening of issues
@@ -637,11 +646,11 @@ Add this section to your report after the Issues Found section:
 ```markdown
 ## Issue Verification Results
 
-| Issue ID | Title | Status | Notes |
-|----------|-------|--------|-------|
-| VI-1 | Unhandled auth error | CONFIRMED | Saw 500 error on invalid login |
-| VI-2 | Missing input validation | NOT REPRODUCED | Form rejected empty input correctly |
-| VI-3 | Inconsistent naming | NOT APPLICABLE | Internal code pattern, not observable in UI |
+| Issue ID | Title | Status | Notes | Evidence |
+|----------|-------|--------|-------|----------|
+| VI-1 | Unhandled auth error | CONFIRMED | Saw 500 error on invalid login | exerciser-20261107T141502-c4d2 |
+| VI-2 | Missing input validation | NOT REPRODUCED | Form rejected empty input correctly | exerciser-20261107T141502-9e01 |
+| VI-3 | Inconsistent naming | NOT APPLICABLE | Internal code pattern, not observable in UI | n/a |
 ```
 
 ### Important
@@ -674,7 +683,7 @@ The human must now:
 ### WHAT YOU SHOULD DO (After Completing Exercise):
 
 ✅ **Present your complete exercise report**
-✅ **Include all screenshots and evidence**
+✅ **Cite the evidence entry id for every step, gate, and verified issue**
 ✅ **Wait for the human to read and process your findings**
 ✅ **Wait for explicit instructions from the human**
 ✅ **Answer clarifying questions if asked**

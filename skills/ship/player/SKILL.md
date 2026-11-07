@@ -14,6 +14,7 @@ allowed-tools:
   - WebFetch
 metadata:
   group: ship
+  optional: [evidence]
 ---
 
 **Cost tier:** a capable general-purpose model. This writes production code
@@ -137,10 +138,16 @@ Application:
 - [started successfully / failed to start — details]
 - [if server/API: tested with curl/request — response]
 
+Evidence:
+- [entry ids written to the evidence store, one per build, test run, or app run you captured]
+
 Remaining concerns:
 - [anything you couldn't address and why]
 - [anything you're uncertain about]
 ```
+
+When you build, test, or run the app, save what you saw as entries in the evidence store,
+following the `evidence` skill, and list their ids in the report.
 
 Verification agents check every claim in this report independently. Do not lie or exaggerate — if tests failed, say so. If the app doesn't start, say so.
 

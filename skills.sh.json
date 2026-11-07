@@ -17,7 +17,8 @@
         "visual-verify",
         "static-analysis",
         "tester",
-        "exerciser"
+        "exerciser",
+        "evidence"
       ]
     },
     {
