@@ -27,6 +27,8 @@ An agent-run repo — a **software factory** — accrues slop faster than any si
 
 You are the **orchestrator**. Subagents do the reading; you hold the judgement: the brief, the order of work, and the page. The whole run is **read-only**: no repo edits, commits, tracker writes, environment changes, or mutating MCP calls. You file tickets and PRs afterwards only when the human asks.
 
+Read-only is a prompt rule, and the scouts read untrusted text (issue bodies, transcripts, logs) while holding a shell. Back it with enforcement where the harness allows: connect the production MCP with read-only credentials, run the session in a permission mode that denies or asks for writes (subagents inherit it), and pass a read-only subagent type as `agentType` when one exists.
+
 ## 1. Brief
 
 Bind the run to this repo. If it has an engineer skill, invoke it first, and pass its name so every subagent does too. Then fill the brief, the `args` documented at the top of [`scripts/audit.workflow.js`](scripts/audit.workflow.js):
