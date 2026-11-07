@@ -1,0 +1,63 @@
+{
+  "meta": {
+    "title": "Acme Unslop Audit",
+    "eyebrow": "acme/shop · unslop audit · 2026-11-07",
+    "repo_url": "https://github.com/acme/shop",
+    "lede": "Sixty agents read three months of session history, 400 open issues, CI runs, production telemetry and the code. They produced 20 proposals; each was checked against the data and then attacked by a skeptic. The diagnosis: the factory produces signals nobody trusts. CI is red for infrastructure reasons, logs are mostly noise, and old tickets never drain.",
+    "method": "Method: 17 scout lanes, a synthesis lead, a deep-dive and a skeptic per candidate, and a completeness critic. Every production and tracker call was read-only."
+  },
+  "themes": [
+    { "key": "ci", "label": "CI & tests" },
+    { "key": "factory", "label": "Agent factory" },
+    { "key": "arch", "label": "Backend architecture" },
+    { "key": "prod", "label": "Production & data" },
+    { "key": "slop", "label": "Deletion" }
+  ],
+  "theme_of": { "C01": "ci", "C02": "factory", "C03": "arch", "C04": "prod", "C05": "slop" },
+  "short": { "C01": "Resilient CI test runner", "C04": "Batched order-log retention" },
+  "stats": [
+    { "n": "0/14", "text": "nightly runs green. It is the only run of the end-to-end suite.", "source": "C01 · gh run list", "theme": "bad" },
+    { "n": "31%", "text": "of failed CI jobs match an infrastructure signature", "source": "C01 · 90 sampled jobs", "theme": "ci" },
+    { "n": "4.2M", "text": "order-log rows past retention; the cleanup job times out every hour", "source": "C04 · pg_stat + logs", "theme": "prod" },
+    { "n": "48%", "text": "of open agent tickets are older than 60 days", "source": "C02 · tracker", "theme": "factory" }
+  ],
+  "charts": [
+    {
+      "title": "Why CI jobs fail",
+      "caption": "90 sampled failed jobs over two weeks. C01.",
+      "type": "doughnut",
+      "labels": ["Real test failure", "Runner connection reset", "Out of memory", "Other"],
+      "datasets": [{ "label": "jobs", "data": [62, 18, 6, 4], "color": ["muted", "bad", "warn", "line"] }]
+    },
+    {
+      "title": "Agent tickets are worked newest-first",
+      "caption": "Closures in the last 6 weeks vs what is open, by ticket age. C02.",
+      "type": "bar",
+      "stacked": true,
+      "labels": ["Open", "Closed in 6 weeks"],
+      "datasets": [
+        { "label": "≤ 7 days", "data": [20, 180], "color": "good" },
+        { "label": "8–60 days", "data": [90, 50], "color": "warn" },
+        { "label": "> 60 days", "data": [100, 4], "color": "factory" }
+      ]
+    }
+  ],
+  "waves": [
+    { "tag": "Wave 0 · this week · all S", "title": "Stop the bleeding", "items": [
+      { "ref": "C04", "text": "Batch the retention delete." },
+      { "ref": "C05", "text": "Delete the dead admin app." },
+      { "text": "Add a dependency audit ratchet (critic gap)." }
+    ] },
+    { "tag": "Wave 1 · CI signal", "title": "Make red mean something", "items": [
+      { "ref": "C01", "text": "Run suites detached and resume the log stream." }
+    ] },
+    { "tag": "Wave 2 · structure", "title": "Deepen the backend", "items": [
+      { "ref": "C03", "text": "One repository base that owns tenant scope." }
+    ] }
+  ],
+  "sequence": "flowchart LR\n  C04[\"C04 retention\"] --> C01[\"C01 CI runner\"]\n  C05[\"C05 delete admin\"] --> C03[\"C03 repo base\"]\n  C01 --> C03",
+  "rules": [
+    { "title": "Gates live in code, not in skill prose", "text": "If a rule can be skipped, agents under deadline skip it.", "evidence": "The test-evidence rule is followed by 1 in 8 merged PRs (C01)." },
+    { "title": "Queues need aging and WIP limits", "text": "Agents pick the newest ticket, so the backlog becomes a landfill.", "evidence": "48% of agent tickets are older than 60 days; 2% of closures come from them (C02)." }
+  ]
+}
