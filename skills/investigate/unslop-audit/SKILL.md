@@ -1,11 +1,11 @@
 ---
 name: unslop-audit
 description: >-
-  Periodic whole-repo health audit for an agent-run codebase: scouts mine session history, the
-  tracker, CI, production telemetry and the code; deep-dives verify and design fixes with
+  Periodic whole-repo health audit: scouts gather evidence from whatever the repo has (agent
+  history, tracker, CI, telemetry, code); deep-dives verify and design fixes with before/after
   diagrams; skeptics attack each proposal; a critic hunts gaps. Ends in a picture-first report
-  page of ranked, sequenced proposals. Expensive (about 60-70 subagents).
-argument-hint: "[--repo=<path>] [--skip=<lane,...>] [--candidates=18-24]"
+  page of ranked, sequenced proposals. Expensive (dozens of subagents).
+argument-hint: "[--repo=<path>] [--candidates=12-20]"
 disable-model-invocation: true
 allowed-tools:
   - Read
@@ -19,65 +19,68 @@ allowed-tools:
   - Artifact
 metadata:
   group: investigate
-  requires: [thermo-nuclear-code-quality-review, improve-codebase-architecture, codebase-design, ponytail, ponytail-review]
-  optional: [visual-verify, to-tickets]
+  optional: [thermo-nuclear-code-quality-review, improve-codebase-architecture, codebase-design, ponytail-review, rich-page, visual-verify, to-tickets]
 ---
 
-An agent-run repo — a **software factory** — accrues slop faster than any single change shows it: debt filed as follow-up tickets, workarounds written into gotcha docs, gates that exist only as prose, signals that are always red. This audit is the periodic **garbage collection**: it gathers evidence from every place the factory leaves traces, turns it into a small set of verified, sequenced proposals, and draws them.
+A repo accrues slop faster than any single change shows it, and an agent-run repo accrues it fastest. The signs: debt filed as follow-up tickets, workarounds written into gotcha docs, gates that exist only as prose, signals that are always red. This audit is the periodic **garbage collection**. It gathers evidence from every place the work leaves traces, turns that evidence into a small set of verified, sequenced proposals, and draws them.
 
-You are the **orchestrator**. Subagents do the reading; you hold the judgement: the brief, the order of work, and the page. The whole run is **read-only**: no repo edits, commits, tracker writes, environment changes, or mutating MCP calls. You file tickets and PRs afterwards only when the human asks.
+You are the **orchestrator**. Subagents do the reading; you hold the judgement: which lanes to run, the order of work, and the page. The whole run is **read-only**: no repo edits, commits, tracker writes, environment changes, or mutating MCP calls. You file tickets and PRs afterwards only when the human asks.
 
-Read-only is a prompt rule, and the scouts read untrusted text (issue bodies, transcripts, logs) while holding a shell. Back it with enforcement where the harness allows: connect the production MCP with read-only credentials, run the session in a permission mode that denies or asks for writes (subagents inherit it), and pass a read-only subagent type as `agentType` when one exists.
+Read-only is enforced only by the prompt, and the scouts read untrusted text (issue bodies, transcripts, logs) while holding a shell. Back the rule with enforcement where the harness allows:
+- connect observability MCPs with read-only credentials
+- run in a permission mode that denies writes or asks before them (subagents inherit it)
+- pass a read-only subagent type as `agentType` when one exists
 
 ## 1. Brief
 
-Bind the run to this repo. If it has an engineer skill, invoke it first, and pass its name so every subagent does too. Then fill the brief, the `args` documented at the top of [`scripts/audit.workflow.js`](scripts/audit.workflow.js):
+Bind the run to this repo. If it has an engineer skill, invoke it first and pass its name, so every subagent does too.
 
-- `repo`, `scratchpad`, `today`, `project` (one line: stack and shape), `tracker` (how to query it), `rules` (the repo's own hard don'ts, e.g. "never start a dev environment").
-- `history`: every agent transcript store on this machine. Look across all harness accounts, not just the current one: resolve symlinks and dedupe. For example, Claude Code keeps `~/.claude/projects` plus one per extra config dir, and Codex keeps `~/.codex`. `match` holds the substrings that pick this repo's project dirs.
-- `prod`: a read-only observability MCP (logs, metrics, traces, database) if one is connected. Note which of its tools mutate; the scouts must not call them.
-- `areas`: backend, frontend and tooling paths for the code-review lanes.
-- `windows`: transcript date ranges counted back from `today`.
+Then survey which evidence sources this repo really has: transcript stores (across all harness accounts on the machine), the tracker, CI history, observability MCPs, docs and ADRs, and the code areas. From that, write 8-16 **lanes**, using [`references/lanes.md`](references/lanes.md) as a menu and adding lanes this product needs. Every lane prompt names its concrete source: paths, commands, MCP name, date range.
+
+Fill the rest of the `args` documented at the top of [`scripts/audit.workflow.js`](scripts/audit.workflow.js):
+- `project`: one line on stack and shape.
+- `rules`: the repo's own hard don'ts.
 - `models` by cost tier. `scout` and `skeptic` are mid tier. `reviewer`, `dive` and `lead` are the strongest tier below yours.
-- `previous`: if `~/.local/share/unslop-audit/<repo>/` holds an earlier run, pass its proposals' `{id, title, score}` so recurring problems keep their ids and show their trend.
-- `skip`: lanes whose source this repo lacks. A lane with a missing source (no transcripts, no prod) drops out by itself.
+- `previous`: if `~/.local/share/unslop-audit/<repo>/` holds an earlier run, the `{id, title, score}` of its proposals. Recurring problems then keep their ids and show their trend.
 
-Done when every arg is filled, or deliberately left empty with its lane skipped. Save the brief as `brief.json` in the scratchpad.
+Done when every lane names a source that exists. Save the brief as `brief.json` in the scratchpad.
 
 ## 2. Fan out
 
-Run the script with the brief as its input. With Claude Code's workflow runner that is `Workflow({ scriptPath: "<this skill>/scripts/audit.workflow.js", args: <brief> })`; it runs in the background and notifies you when it finishes. On a harness without a workflow runner, dispatch the same prompts as subagents: the lanes in parallel, then synthesis, then a dive→skeptic pair per candidate, then the critic. Tell the human the expected cost first, in one line. The first run took 66 agents, about 6M tokens and 2.5 hours.
+Run the script with the brief as input. With Claude Code's workflow runner, that is `Workflow({ scriptPath: "<this skill>/scripts/audit.workflow.js", args: <brief> })`. On a harness without one, dispatch the same prompts as subagents: the lanes in parallel, then synthesis, then a dive→skeptic pair per candidate, then the critic.
 
-The **lanes** (scouts) are defined once, in `LANES` in the script: three transcript windows, Codex history, flaky CI, follow-up tickets, encoded debt, prod ops, prod data, backend architecture, frontend and tooling thermo-nuclear reviews, deletion, churn hot spots, test health, security and dependencies, and the software factory itself. Add a repo-specific lane through `extraLanes` rather than by editing the script.
-
-Wait for the completion notice.
+Before starting, tell the human the cost in one line: about lanes + 2 × candidates + 2 agents. One run with 16 lanes and 24 candidates took about 6M tokens and 2.5 hours. Then wait for the completion notice.
 
 ## 3. Read
 
-Condense the output with `jq` (`.result.results[] | {proposal, challenge}`, `.result.critic`) and read every proposal together with its challenge. The skeptic's `priority_score` is the score. Its `claims_checked` and `effort_risk_correction` override the deep-dive wherever they disagree.
+Condense the output with `jq` (`.result.results[] | {proposal, challenge}`, `.result.critic`). Read every proposal together with its challenge. The score is the skeptic's `priority_score`. Where the skeptic and the deep-dive disagree, the skeptic's `claims_checked` and `effort_risk_correction` win.
 
 Done when you can state, for every proposal, its score, its biggest objection, and where the critic sequenced it.
 
-## 4. Overview
+## 4. Report
 
-Write `overview.json`, the judgement half of the page: themes, stat tiles, evidence charts, waves, the dependency graph, and the factory rules. The contract is in [`references/overview.md`](references/overview.md). Every number on the page traces back to a proposal or a scout note (`scout-*.md` in the scratchpad).
+Design one page for this audit's findings. Don't use a template: let the evidence decide the charts, and let the repo decide the sections. Build it with `rich-page` if installed, otherwise with the harness's page tool. The page must have:
 
-## 5. Build
+- **Pictures before prose in every proposal**: its before/after diagrams, its numbers as now vs target, and its effort, risk and breaking change at a glance. Prose comes after the pictures. Where a dive's diagrams are missing or weak, dispatch a cheap-tier illustrator subagent for that proposal.
+- **The headline numbers** as stat tiles and comparison charts (useful vs waste, cause shares, trends).
+- **The ranking**, with what the skeptics changed: score shifts and the claims they refuted.
+- **Waves**: the order of work, built from the critic's sequencing and then score per effort. Wave 0 is small, safe, and stops active damage. Critic gaps go into a wave too.
+- **Cross-cutting rules**: patterns that several proposals share, each phrased as a mechanism (a check, a budget, a WIP limit).
 
-```bash
-node <this skill>/scripts/build-page.mjs --output <workflow output json> --overview overview.json --out <name>-unslop-audit.html
-```
+Every number on the page traces back to a proposal or a scout note (`scout-*.md` in the scratchpad).
 
-The build refuses themes missing from the overview and inline script that fails to parse. It lists proposals that lack before/after diagrams. For each one listed, dispatch a cheap-tier illustrator subagent with the proposal and the `MERMAID_RULES` from the script, write its `visual` into a copy of the output, and rebuild.
+## 5. Look
 
-Done when the list is empty. Every card then opens on pictures: a priority, effort, risk, footprint and breaking-change strip; today vs after-the-fix diagrams; now vs target bars; and the skeptic's claim ledger. The prose comes after the pictures.
+Render the page headless and screenshot it in light and dark at desktop width, and at a 390px phone width. Open two proposals. Done when there are no console errors, the diagrams are legible, and nothing scrolls horizontally. If `visual-verify` is installed, it does this pass.
 
-## 6. Look
+## 6. Hand over
 
-Render the page headless, for example with Playwright. Check light and dark at 1280px and a 390px phone. Open two cards and look at the screenshots: no console errors, diagrams legible, no horizontal scroll. If `visual-verify` is installed, it does this pass.
-
-## 7. Hand over
-
-- Archive `brief.json`, the output, `overview.json`, the page and the scout notes to `~/.local/share/unslop-audit/<repo>/<today>/`. The next run's `previous` comes from there.
+- Archive `brief.json`, the workflow output, the page and the scout notes to `~/.local/share/unslop-audit/<repo>/<today>/`. The next run's `previous` comes from there.
 - Copy the page somewhere durable for the human, and publish it as a private shared page when the harness can.
-- Report: the link and the path, Wave 0, the claims the skeptics refuted, and any assumption a proposal rests on that nobody tested. Offer `to-tickets` for the waves the human picks.
+- Report:
+  - the link and the path
+  - Wave 0
+  - the claims the skeptics refuted
+  - any assumption a proposal rests on that nobody tested
+
+  Offer `to-tickets` for the waves the human picks.
