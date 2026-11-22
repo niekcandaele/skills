@@ -25,7 +25,8 @@ nothing, but it does mean the files aren't runtime-agnostic all the way down.
 
 Some skills also ask more than others. `verify` and `epic-runner` are much faster
 where sub-agents run in parallel, though both document what to do when they can't.
-`codex-reviewer` shells out to the Codex CLI and needs it installed.
+`second-model-reviewer` shells out to a second model's CLI and needs one installed and
+logged in — Antigravity (`agy`) or Codex; it picks and remembers one per machine.
 
 ## Development
 

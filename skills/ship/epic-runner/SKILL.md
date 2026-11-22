@@ -54,7 +54,7 @@ epic-runner            you — the scheduler
 ├── delivery-agent     every forge call and tracker mutation the schedule needs — CI
 │                      proof, merge, PR state, lifecycle — returned as fixed fields
 └── epic-verify-agent  one per finalization round, holds the full report so you don't
-    └── verify → reviewer, codex-reviewer, comment-review, ponytail-review, qa,
+    └── verify → reviewer, second-model-reviewer, comment-review, ponytail-review, qa,
                  ux-reviewer, static-analysis, tester, exerciser, visual-verify
 ```
 
@@ -241,10 +241,13 @@ Five cheap checks that each prevent a specific way the run wastes hours before f
   them. **Never work around branch protection** — not by self-approving, not by pushing to a
   protected branch, not by disabling a rule. It exists for a reason and it is not yours to
   reinterpret.
-- **Codex availability.** `verify` runs `codex-reviewer` as an independent second-model
-  review. The epic gets one verification, in Phase 2, so a missing or unauthenticated Codex
-  CLI means the run's only review happens with one fewer reviewer — and it is discovered at
-  the very end, when there is no time left to do anything about it. Check it at minute one.
+- **Second-model availability.** `verify` runs `second-model-reviewer` as an independent
+  second-model review. The epic gets one verification, in Phase 2, so a missing or
+  unauthenticated backend means the run's only review happens with one fewer reviewer — and
+  it is discovered at the very end, when there is no time left to do anything about it. Check
+  it at minute one with `scripts/second-model probe` from the `second-model-reviewer` skill's
+  directory (a sibling of this skill's): exit 3 means no backend is installed and logged in,
+  and its table shows which one to fix.
 - **Neighbouring epics.** Other long-lived epic branches against the same target are where
   the worst conflicts come from, and the user is the only one who can sequence them. For
   each other remote `epic/*` branch, report its files-touched count and top-level

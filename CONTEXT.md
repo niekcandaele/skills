@@ -28,6 +28,14 @@ _Avoid_: generic, portable, degrades gracefully
 A per-repository skill describing how to build, test, and run that repository, which other skills read for project-specific context.
 _Avoid_: project skill, repo skill, local skill
 
+**Second model**:
+A model from a different family than the one orchestrating, run through a local CLI so `verify` gets a review that does not share the orchestrator's blind spots.
+_Avoid_: second opinion (that is what it produces), external reviewer
+
+**Backend**:
+One CLI that runs the **Second model** for `second-model-reviewer` — currently `antigravity` or `codex`. Each machine has one active backend, chosen and remembered by the skill's `second-model` script outside the repository.
+_Avoid_: provider (the vendor behind it), engine, adapter
+
 **Run**:
 One complete player–coach invocation, from setup through one terminal status.
 _Avoid_: session, loop (the run contains loops)
@@ -109,6 +117,9 @@ _Avoid_: suggestion, improvement, nice-to-have
   `player-coach` requires it)
 - Several **Skills** read the **Engineer skill** of the repository they run against
 - A **Skill** is **Harness-neutral** or it names the **Harness** it requires
+- A machine has one active **Backend**; it changes only when a human switches it or its CLI is
+  uninstalled, and an unauthenticated one falls back to the next healthy **Backend** for one
+  review only
 - A player–coach **Run** contains one or more **Player turns** and **Verification runs**
 - A published **Run** leaves ordered commits and PR state on the forge; its final PR body
   presents the **Implementation journey** synthesized from those and the **Run ledger**

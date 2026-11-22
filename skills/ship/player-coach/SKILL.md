@@ -400,15 +400,15 @@ Compute a factual decision from the report:
    player turn and same SHA.
 4. Every custom exerciser/review gate must pass. `FAIL` becomes severity 10 feedback;
    `BLOCKED` or `NOT CHECKED` becomes severity 9.
-5. A judgement reviewer must have run. At light depth `verify` invokes `codex-reviewer` when
-   Codex is available and `reviewer` when it is not, and reports which. Either one at
-   `COMPLETED` passes. A run where neither produced a result is `RERUN` — that is a hole in
+5. A judgement reviewer must have run. At light depth `verify` invokes
+   `second-model-reviewer` when a second model is available and `reviewer` when it is not,
+   and reports which, with the backend and model. Either one at `COMPLETED` passes. A run where neither produced a result is `RERUN` — that is a hole in
    the pipeline, not a review that found nothing. Record the reviewer's identity in the
    ledger and name it once in the friction log, because the two are different models and a
    reader deciding how much this approval is worth needs to know which one gave it.
 
-   There is no stop-the-world policy for an unavailable Codex any more. The fallback means
-   the change was independently reviewed either way, and the hole a policy would have
+   There is no stop-the-world policy for an unavailable second model any more. The fallback
+   means the change was independently reviewed either way, and the hole a policy would have
    guarded is closed structurally.
 
 A finding the ledger already holds as `open` with `occurrences > 1` is sticky friction.
@@ -672,7 +672,7 @@ HEAD_SHA: <full SHA verified by the final verification run, current HEAD in --no
 REMOTE_HEAD_SHA: <last observed full provider head, equal to HEAD_SHA on a stable published run, or none>
 TURNS_USED: <n> of <m>
 VERIFY_RUNS: <n>
-REVIEWER: codex-reviewer | reviewer (Codex unavailable) | none
+REVIEWER: second-model-reviewer (<backend>: <model>) | reviewer (no second model available) | none
 ```
 
 | Status | Meaning |

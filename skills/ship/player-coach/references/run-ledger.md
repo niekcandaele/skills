@@ -126,7 +126,7 @@ while reconstructing decisions from a PR body would be inventing them.
       "fullAudit": true,
       "status": "ok",
       "decision": "FEEDBACK",
-      "gates": {"exerciser": "PASSED", "judgementReviewer": "reviewer (Codex unavailable)", "customGates": "PASS"},
+      "gates": {"exerciser": "PASSED", "judgementReviewer": "reviewer (no second model available)", "customGates": "PASS"},
       "findingIds": ["F-1", "F-2"]
     }
   ],
@@ -141,7 +141,7 @@ while reconstructing decisions from a PR body would be inventing them.
       "class": "correctness",
       "severity": 8,
       "severityHistory": [8, 8, 6],
-      "sources": ["reviewer", "codex-reviewer"],
+      "sources": ["reviewer", "second-model-reviewer"],
       "firstSeen": {"verifyRun": 1, "turn": 1, "headSha": "<full sha>"},
       "lastSeen": {"verifyRun": 3, "turn": 3, "headSha": "<full sha>"},
       "occurrences": 3,
@@ -151,7 +151,7 @@ while reconstructing decisions from a PR body would be inventing them.
       "evidence": "reviewer quoted the cached rejection at line 34",
       "matchedTo": null,
       "matchReason": null,
-      "reaffirmedBy": [{"verifyRun": 4, "skill": "codex-reviewer", "reason": "unchanged since delta base", "newHarmEvidence": false}],
+      "reaffirmedBy": [{"verifyRun": 4, "skill": "second-model-reviewer", "reason": "unchanged since delta base", "newHarmEvidence": false}],
       "followUp": {"kind": "none", "ref": null}
     }
   ],

@@ -9,7 +9,7 @@ description: >
 argument-hint: "[--depth=light|deep] [--mode=fix|report-only] [--scope=staged|unstaged|branch|all] [--base=<ref>] [--files=file1,file2] [--module=path] [--skip-ux] [--skip-visual] [--format=markdown|json] [--output=<path>] [--plan-file=<path>] [--epic-context=<path>] [--evidence-dir=<path>]"
 metadata:
   group: quality
-  requires: [reviewer, codex-reviewer, comment-review, ponytail-review, qa, tester, ux-reviewer, visual-verify, static-analysis, exerciser, debugger]
+  requires: [reviewer, second-model-reviewer, comment-review, ponytail-review, qa, tester, ux-reviewer, visual-verify, static-analysis, exerciser, debugger]
   optional: [evidence]
 ---
 
@@ -40,7 +40,7 @@ cutoff, and silently getting judgement-based fixing instead would surprise it.
 | | `light` (default) | `deep` |
 |---|---|---|
 | Triage (Phase 3) | Job A only | Job A + Job B |
-| Judgement review | **one**: `codex-reviewer`, or `reviewer` when Codex is unavailable | `reviewer`, `codex-reviewer`, `comment-review`, `qa`, `ux-reviewer` |
+| Judgement review | **one**: `second-model-reviewer`, or `reviewer` when no second model is available | `reviewer`, `second-model-reviewer`, `comment-review`, `qa`, `ux-reviewer` |
 | Lean pass | `ponytail-review` | `ponytail-review` |
 | Deterministic | `static-analysis`, `tester` | `static-analysis`, `tester` |
 | Empirical | `exerciser`, carrying its own visual lens | `exerciser`, plus `visual-verify` when triage gates it in |
@@ -161,7 +161,7 @@ verification error; silently choosing a different base would verify the wrong ch
 
 Priority order:
 1. **Staged changes exist?** → Scope to staged files only
-2. **Unstaged changes exist?** → Scope to modified files only
+2. **Unstaged or untracked changes exist?** → Scope to modified and untracked files only
 3. **Branch has commits ahead of base?** → Scope to branch changes
 4. **No changes detected?** → Report "nothing to verify" and STOP
 
@@ -171,8 +171,9 @@ Priority order:
 # Check for staged changes
 git diff --cached --name-only
 
-# Check for unstaged changes
+# Check for unstaged changes, including untracked non-ignored files (include_untracked)
 git diff --name-only
+git ls-files --others --exclude-standard
 
 # Check for branch changes
 if git remote get-url origin >/dev/null 2>&1; then
@@ -227,6 +228,9 @@ Also build a machine-usable `SCOPE_METADATA` block for agents that need exact di
 - `included_files`: ordered file/status records admitted to the scope
 - `excluded_files`: ordered path/reason records explicitly excluded; use
   `ALL_OTHER_FILES (outside selected scope)` when paths were not enumerated
+- `include_untracked`: whether untracked, non-ignored files are part of the change, which
+  `diff_command` never shows; `true` for `unstaged`, otherwise `false` unless the scope says so.
+  When `true`, list them in `included_files` as `added` and in an explicit `path_filter`
 
 With `--since=<sha>`, add three more fields describing what changed since the last
 verified head. They are **additive**: every field above keeps its meaning and the full
@@ -274,6 +278,7 @@ SCOPE_METADATA:
 - head_sha: 9d8f...full SHA
 - included_files: src/auth/login.ts,src/auth/middleware.ts
 - excluded_files: ALL_OTHER_FILES (outside selected scope)
+- include_untracked: true
 ```
 
 **5. Resolve the Evidence Store:**
@@ -369,7 +374,7 @@ Assign each the full scoped file list.
 
 - reviewer          Business logic, architecture, patterns, security, robustness.
                     Needs breadth across the whole diff.
-- codex-reviewer    General second-opinion pass, not a specialist router target.
+- second-model-reviewer  General second-opinion pass, not a specialist router target.
 - comment-review    Comment rot, verbose rationale, and comment density can appear in any changed file.
 - ponytail-review   Over-engineering and reuse hunting needs breadth across the whole diff.
 - qa                Test coverage assessment for everything that changed.
@@ -406,7 +411,7 @@ Output a JSON-like mapping:
 {
   "skill_assignments": {
     "reviewer": ["all scoped files"],
-    "codex-reviewer": ["all scoped files"],
+    "second-model-reviewer": ["all scoped files"],
     "comment-review": ["all scoped files"],
     "ponytail-review": ["all scoped files"],
     "qa": ["all scoped files"],
@@ -533,7 +538,7 @@ and 43 s once the cap was raised, with no change to these instructions.
 
 ### At `--depth=deep`
 
-**Always run, every time:** `reviewer`, `codex-reviewer`, `comment-review`, `ponytail-review`, `qa`, `tester`. Triage focuses these with file assignments but never suppresses them — for correctness-facing review, a missed regression costs more than an extra skill run.
+**Always run, every time:** `reviewer`, `second-model-reviewer`, `comment-review`, `ponytail-review`, `qa`, `tester`. Triage focuses these with file assignments but never suppresses them — for correctness-facing review, a missed regression costs more than an extra skill run.
 
 **Run if triage says they apply:** `ux-reviewer` and `visual-verify` (see Phase 3 Job B gating). `--skip-ux` / `--skip-visual` override triage and force a skip.
 
@@ -542,19 +547,22 @@ and 43 s once the cap was raised, with no change to these instructions.
 **Always run, every time:** `tester`, `ponytail-review`, and exactly **one** judgement reviewer chosen like this:
 
 ```bash
-which codex
+<second-model-reviewer's directory>/scripts/second-model resolve
 ```
 
-On success, invoke `codex-reviewer`. Otherwise invoke `reviewer`. Record which one ran — the
-report must say, because a reader cannot otherwise tell what kind of review the change got.
+`second-model-reviewer` is installed beside this skill, so its directory is a sibling of this
+skill's directory. Exit 0 (it prints `backend=… model=…`) → invoke `second-model-reviewer`.
+Any other exit, or no such script → invoke `reviewer`, and keep the reason (`NO_BACKEND_AVAILABLE`,
+or the script missing) for the report. Record which one ran — the report must say, because a
+reader cannot otherwise tell what kind of review the change got.
 
-**Never resolve this fallback inside `codex-reviewer`.** That skill's entire value is model
-diversity; a substitute review running the same model hidden behind its name would report
-`codex-reviewer: COMPLETED` for a pass that had no diversity in it at all. The choice belongs
-here, where it is visible in the composition and in the report.
+**Never resolve this fallback inside `second-model-reviewer`.** That skill's entire value is
+model diversity; a substitute review running the same model hidden behind its name would report
+`second-model-reviewer: COMPLETED` for a pass that had no diversity in it at all. The choice
+belongs here, where it is visible in the composition and in the report.
 
 `reviewer` is the more expensive of the two — it is the broadest review in the suite and its
-cost tier is the most capable model available. On a machine without Codex, light is one
+cost tier is the most capable model available. On a machine with no second model, light is one
 expensive agent rather than one cheap one. That is still one agent, and it is still the right
 substitute: the alternative is a change nobody independently reviewed.
 
@@ -571,7 +579,7 @@ each skill needs, as a rough cost signal:
 - **Most capable model** — `reviewer`. Comprehensive review across design,
   architecture, coherence, hardening, and security. This is the one
   that benefits most from raw capability.
-- **General-purpose model** — `codex-reviewer`, `comment-review`, `ponytail-review`, `qa`,
+- **General-purpose model** — `second-model-reviewer`, `comment-review`, `ponytail-review`, `qa`,
   `ux-reviewer`, `exerciser`, `visual-verify`. Judgment calls, but bounded ones.
 - **Fast, cheap model** — `tester`, `static-analysis`. These run commands and
   report what came back; they are not asked to reason about the result.
@@ -583,11 +591,11 @@ each skill needs, as a rough cost signal:
 4. Instruction to read engineer skill reference files for their domain if available
 5. Skill-specific instructions (see templates below)
 
-For `codex-reviewer`, `SCOPE_METADATA` is authoritative. It must not infer scope mode from filenames or prose when exact metadata is available.
+For `second-model-reviewer`, `SCOPE_METADATA` is authoritative. It must not infer scope mode from filenames or prose when exact metadata is available.
 
 ### Carry-forward rules (only when `--ledger` was supplied without `--no-carry-forward`)
 
-Append this to the prompt of the **judgment** reviewers — `reviewer`, `codex-reviewer`,
+Append this to the prompt of the **judgment** reviewers — `reviewer`, `second-model-reviewer`,
 `qa`, `comment-review`, `ponytail-review`, `ux-reviewer`, `visual-verify`. Never to `tester`,
 `static-analysis`, or `exerciser`: those run commands and report what came back, and a
 machine does not drift the way a fresh reader does.
@@ -670,18 +678,18 @@ Research the project's structure, patterns, and security approach BEFORE evaluat
 Focus on: 'Is this change well-designed, structurally sound, pattern-consistent, robust, and secure?'
 ```
 
-**codex-reviewer:**
+**second-model-reviewer:**
 ```
-Run the local Codex CLI as an independent second-opinion reviewer.
-Shell out to the local Codex CLI — the point is a second engine's opinion, not your own analysis again.
-Follow the codex-reviewer skill's own execution procedure exactly; it owns the invocation, the completion detection, and the timeout. Do not substitute your own — this prompt is scope and context, not a runbook.
+Run this machine's second-model backend as an independent second-opinion reviewer.
+Shell out to the backend's local CLI — the point is a second model's opinion, not your own analysis again.
+Follow the second-model-reviewer skill's own execution procedure exactly; it owns backend resolution, the invocation, the completion detection, the tamper check, and the timeout. Do not substitute your own — this prompt is scope and context, not a runbook.
 Use `SCOPE_METADATA` as the source of truth for scope reconstruction.
-Adapt the verify scope into a temporary diff-only workspace under /tmp so Codex reviews only the intended changes.
+Adapt the verify scope into a temporary diff-only workspace under /tmp so the backend reviews only the intended changes.
 Do NOT infer staged vs unstaged vs branch vs path-filtered scope from assigned files or prose if `SCOPE_METADATA` says otherwise.
 If exact reconstruction from `SCOPE_METADATA` is not possible, report PATCH_CONSTRUCTION_FAILED instead of reviewing an approximate diff.
-If Codex is unavailable (missing CLI, auth missing, network blocked, sandbox blocked), report BLOCKED status with a short factual reason.
+If the backend is unavailable (none resolves, missing CLI, auth missing, network blocked, sandbox blocked, usage limit), report BLOCKED status with a short factual reason.
 If scope is `--scope=all`, report SKIPPED_UNSUPPORTED_SCOPE rather than attempting a whole-codebase audit.
-Normalize Codex output into: title, severity, location, description.
+Normalize the backend's output into: title, severity, location, description, and name the backend and model in the report.
 ```
 
 **comment-review:**
@@ -747,7 +755,7 @@ EVIDENCE_DIR: {EVIDENCE_DIR} — save screenshots per the evidence skill and rep
 Take screenshots at desktop (1440-wide, full-page) AND mobile (390-wide, full-page). If responsive sizing changed, sample boundary widths too.
 Open every PNG with `Read` and apply the holistic articulation step described in the skill: write 2-3 sentences describing the composition in designer's terms (balance, weight, hierarchy, rhythm, alignment, density, color, typography). Anything in that paragraph that reads as a complaint becomes a finding.
 Focus on: 'Would a designer ship this?' — not 'is anything imperfect?'
-If no UI-rendering files in scope or no running app discoverable, return STATUS: SKIPPED with a one-line factual reason — same convention as codex-reviewer.
+If no UI-rendering files in scope or no running app discoverable, return STATUS: SKIPPED with a one-line factual reason — same convention as second-model-reviewer.
 Output structured findings (Title / Severity / Location / Category / Description / evidence entry ids) per the skill's reviewer-mode protocol.
 ```
 
@@ -821,17 +829,18 @@ Collect structured findings from each skill. Extract ONLY:
 
 **Discard investigation narratives.** Keep the orchestrator context lean.
 
-For `codex-reviewer`, also collect skill status if no findings were produced:
+For `second-model-reviewer`, also collect its `Backend` line, and its status:
 - `COMPLETED`
-- `BLOCKED`
+- `BACKEND_TAMPERED` — findings are reported, but the backend modified its review workspace
+- `BLOCKED`, with its reason
 - `SKIPPED_UNSUPPORTED_SCOPE`
 
 For `visual-verify`, also collect skill status if no findings were produced:
 - `COMPLETED`
 - `SKIPPED` with reason (`NO_UI_FILES_IN_SCOPE`, `NO_RUNNING_APP_DISCOVERABLE`, `NO_SCREENSHOT_MECHANISM`). SKIPPED is expected behavior, not a warning — it just means there was nothing visual in scope.
 
-**Codex BLOCKED handling:** If `codex-reviewer` reports BLOCKED, this is a significant event — the independent second-model review did not run. Flag it prominently in the report:
-Include BLOCKED status with high visibility in the Agent Results Summary and add a prominent warning after the summary table, in every mode. Continue without asking.
+**Second-model BLOCKED handling:** If `second-model-reviewer` reports BLOCKED or `BACKEND_TAMPERED`, this is a significant event — the independent second-model review did not run, or ran and edited the code it was reviewing. Flag it prominently in the report:
+Include the status, its reason, and the backend with high visibility in the Agent Results Summary and add a prominent warning after the summary table, in every mode. Continue without asking. A `fallback` in the `Backend` line is not a warning, but name it in the summary row.
 - `SKIPPED_UNSUPPORTED_SCOPE` is expected for `--scope=all` and is not flagged as a warning.
 
 ### 7b. Conditional: debugger
@@ -983,15 +992,15 @@ bias the floor exists to cancel.
 
 ## Triage Summary
 
-**Skills run:** reviewer, codex-reviewer, comment-review, ponytail-review, tester, qa, ux-reviewer, visual-verify, exerciser
+**Skills run:** reviewer, second-model-reviewer, comment-review, ponytail-review, tester, qa, ux-reviewer, visual-verify, exerciser
 **Skills skipped:** [none, or each skipped skill with its reason — `visual-verify (gated: no UI-rendering files in scope)`, `ux-reviewer (--skip-ux)`, `visual-verify (not present in available skills)`, `qa (not in light composition)`]
-**Judgement reviewer:** [at light: `codex-reviewer` or `reviewer (Codex unavailable)`; at deep: `all five`]
+**Judgement reviewer:** [at light: `second-model-reviewer (<backend>: <model>)` or `reviewer (no second model available: <reason>)`; at deep: `all five`]
 **Lean pass:** [`ponytail-review` net metric — `net: -N lines possible.` or `Lean already. Ship.`]
 **Static analysis:** ESLint (3 findings), tsc (1 finding)
 
 A gated skip must always name its reason. A mis-gate is only correctable if it is visible in the report.
 
-At light the reviewer line is not decoration. `codex-reviewer` and `reviewer` are different
+At light the reviewer line is not decoration. `second-model-reviewer` and `reviewer` are different
 models looking for different things, and a reader deciding how much to trust this report needs
 to know which one they got.
 
@@ -1004,7 +1013,7 @@ to know which one they got.
 | static-analysis | Completed | 4 findings (3 warnings, 1 error) |
 | tester | X passed, Y failed | [brief note] |
 | reviewer | Completed | Found N items (design, arch, coherence, hardening, security; net -N lines possible) |
-| codex-reviewer | Completed / **BLOCKED** / Skipped | Found N items / [reason] |
+| second-model-reviewer | Completed / **BLOCKED** / **Tampered** / Skipped | `<backend>: <model>`; found N items / [reason] |
 | comment-review | Completed | Found N items / Comments clean |
 | qa | Completed | Found N items |
 | ux-reviewer | Completed / Skipped | Found N items / [gating or override reason] |
@@ -1160,7 +1169,7 @@ never add `endLine` there. Omit `findings[].location` when none applies and set
     "skills_skipped": ["visual-verify"]
   },
   "skillResults": [
-    {"skill": "reviewer", "status": "COMPLETED", "notes": "Judgement reviewer at light depth (Codex unavailable). Found 1 item"},
+    {"skill": "reviewer", "status": "COMPLETED", "notes": "Judgement reviewer at light depth (no second model available: NO_BACKEND_AVAILABLE). Found 1 item"},
     {"skill": "ponytail-review", "status": "COMPLETED", "notes": "Lean already. Ship."},
     {"skill": "qa", "status": "SKIPPED", "notes": "not in light composition"},
     {"skill": "exerciser", "status": "PASSED", "notes": "Flow completed; visual lens active, 0 visual findings"}
@@ -1214,8 +1223,9 @@ Field rules:
   debugger, and every run or skipped review skill. Each item has exactly `skill`, `status`,
   and `notes`; `notes` may be an empty string. Normalize `status` to `COMPLETED`, `PASSED`,
   `FAILED`, `BLOCKED`, `SKIPPED`, or `NOT_RUN`; put counts and provider-specific detail in
-  `notes`. Exerciser uses `PASSED`/`FAILED`/`BLOCKED`, and Codex uses
-  `COMPLETED`/`BLOCKED`/`SKIPPED`, so callers can apply gates by exact value.
+  `notes`. Exerciser uses `PASSED`/`FAILED`/`BLOCKED`, and second-model-reviewer uses
+  `COMPLETED`/`BLOCKED`/`SKIPPED` (a `BACKEND_TAMPERED` run is `COMPLETED` with the tamper and
+  the backend in `notes`), so callers can apply gates by exact value.
 - `issues` retains the assigned VI ID and structured location. `findings` mirrors each
   issue without its ID so existing adversary consumers continue to work unchanged.
 - `exerciserVerification` contains one entry per issue the exerciser evaluated. `issue`
