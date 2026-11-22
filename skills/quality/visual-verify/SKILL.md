@@ -310,7 +310,7 @@ location; screenshots are evidence, not addresses.
     ladder is exhausted
 
 SKIPPED is expected behavior in many runs, not an error — same convention as
-the codex-reviewer's BLOCKED block: state the reason, don't apologize, don't
+the second-model-reviewer's BLOCKED block: state the reason, don't apologize, don't
 fabricate a review you couldn't perform.
 
 ## Output Format

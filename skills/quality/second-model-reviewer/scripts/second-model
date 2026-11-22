@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# Chooses and remembers which second-model backend this machine reviews with.
+# The choice is per machine, so it lives in the user's config dir, never in the repo.
+set -euo pipefail
+
+BACKENDS=(antigravity codex)
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/second-model"
+CONFIG="$CONFIG_DIR/config.json"
+
+usage() {
+  cat <<'EOF'
+Usage: second-model <command>
+
+  probe                          list each backend: installed, authenticated
+  resolve                        print the backend to review with: backend= model= fallback=
+                                 (plus configured= when falling back)
+  use <backend> [--model <m>]    choose a backend explicitly
+  record <backend> <status>      remember a review's outcome for that backend
+  status                         print the config file
+
+Backends, in probe order: antigravity, codex
+Exit codes: 0 ok, 2 usage error, 3 NO_BACKEND_AVAILABLE
+EOF
+}
+
+die_usage() {
+  echo "second-model: $1" >&2
+  usage >&2
+  exit 2
+}
+
+for tool in jq timeout; do
+  command -v "$tool" >/dev/null || { echo "second-model: $tool is required (on macOS, timeout ships in coreutils)" >&2; exit 2; }
+done
+
+binary_of() {
+  case "$1" in
+    antigravity) echo agy ;;
+    codex) echo codex ;;
+    *) die_usage "unknown backend '$1' (expected: ${BACKENDS[*]})" ;;
+  esac
+}
+
+default_model_of() {
+  case "$1" in
+    antigravity) echo gemini-4-carbon-medium ;;
+    codex) echo "" ;;
+  esac
+}
+
+# Antigravity also serves non-Gemini models; one of those would review with the same
+# family as the orchestrator and defeat the point of a second model.
+check_model() {
+  local backend="$1" model="$2"
+  if [[ "$backend" == antigravity && "$model" != gemini-* ]]; then
+    echo "second-model: refusing model '$model' for antigravity: only gemini-* models give a second model family" >&2
+    exit 2
+  fi
+}
+
+installed() { command -v "$(binary_of "$1")" >/dev/null 2>&1; }
+
+authenticated() {
+  case "$1" in
+    antigravity) timeout 30 agy models </dev/null >/dev/null 2>&1 ;;
+    codex) timeout 30 codex login status </dev/null >/dev/null 2>&1 ;;
+  esac
+}
+
+healthy() { installed "$1" && authenticated "$1"; }
+
+read_config() {
+  if [[ -s "$CONFIG" ]]; then cat "$CONFIG"; else echo '{}'; fi
+}
+
+write_config() {
+  mkdir -p "$CONFIG_DIR"
+  local tmp
+  tmp=$(mktemp "$CONFIG_DIR/config.json.XXXXXX")
+  cat >"$tmp"
+  # A failed jq upstream still hands us EOF; an empty config would wedge every later write.
+  if [[ ! -s "$tmp" ]]; then
+    rm -f "$tmp"
+    echo "second-model: refusing to write an empty config to $CONFIG" >&2
+    exit 2
+  fi
+  mv "$tmp" "$CONFIG"
+}
+
+choose() {
+  local backend="$1" model="$2" chosen_by="$3"
+  read_config | jq --arg b "$backend" --arg m "$model" --arg c "$chosen_by" \
+    '.backend = $b | .model = (if $m == "" then null else $m end) | .chosen_by = $c' |
+    write_config
+}
+
+first_healthy_except() {
+  local skip="$1" b
+  for b in "${BACKENDS[@]}"; do
+    [[ "$b" == "$skip" ]] && continue
+    if healthy "$b"; then echo "$b"; return 0; fi
+  done
+  return 1
+}
+
+cmd_probe() {
+  local b any=1 inst auth
+  printf '%-12s %-10s %s\n' BACKEND INSTALLED AUTHENTICATED
+  for b in "${BACKENDS[@]}"; do
+    inst=no auth=no
+    if installed "$b"; then
+      inst=yes
+      if authenticated "$b"; then auth=yes any=0; fi
+    fi
+    printf '%-12s %-10s %s\n' "$b" "$inst" "$auth"
+  done
+  if [[ $any -ne 0 ]]; then echo NO_BACKEND_AVAILABLE; exit 3; fi
+}
+
+emit() {
+  printf 'backend=%s model=%s fallback=%s' "$1" "$2" "$3"
+  [[ $# -ge 4 ]] && printf ' configured=%s' "$4"
+  printf '\n'
+}
+
+cmd_resolve() {
+  local config backend model next
+  config=$(read_config)
+  backend=$(jq -r '.backend // empty' <<<"$config")
+
+  if [[ -z "$backend" ]] || ! installed "$backend"; then
+    if ! next=$(first_healthy_except ""); then
+      echo NO_BACKEND_AVAILABLE
+      exit 3
+    fi
+    choose "$next" "$(default_model_of "$next")" probe
+    emit "$next" "$(default_model_of "$next")" false
+    return
+  fi
+
+  model=$(jq -r '.model // empty' <<<"$config")
+  [[ -n "$model" ]] || model=$(default_model_of "$backend")
+  [[ -n "$model" ]] && check_model "$backend" "$model"
+
+  if authenticated "$backend"; then
+    emit "$backend" "$model" false
+    return
+  fi
+
+  # Sticky choice: an expired login falls back for this run only and keeps the config.
+  if next=$(first_healthy_except "$backend"); then
+    emit "$next" "$(default_model_of "$next")" true "$backend"
+    return
+  fi
+  echo NO_BACKEND_AVAILABLE
+  exit 3
+}
+
+cmd_use() {
+  [[ $# -ge 1 ]] || die_usage "use needs a backend"
+  local backend="$1" model
+  shift
+  binary_of "$backend" >/dev/null
+  model=$(default_model_of "$backend")
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --model)
+        [[ $# -ge 2 ]] || die_usage "--model needs a value"
+        model="$2"
+        shift 2
+        ;;
+      *) die_usage "unknown argument '$1'" ;;
+    esac
+  done
+  [[ -n "$model" ]] && check_model "$backend" "$model"
+  installed "$backend" || echo "second-model: warning: $(binary_of "$backend") is not on PATH; resolve will probe instead" >&2
+  choose "$backend" "$model" user
+  emit "$backend" "$model" false
+}
+
+cmd_record() {
+  [[ $# -eq 2 ]] || die_usage "record needs <backend> <status>"
+  binary_of "$1" >/dev/null
+  read_config | jq --arg b "$1" --arg s "$2" --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '.results[$b] = {last: $s, at: $t}' | write_config
+}
+
+cmd_status() {
+  if [[ -f "$CONFIG" ]]; then
+    jq . "$CONFIG"
+  else
+    echo "no config at $CONFIG; resolve will probe and create it"
+  fi
+}
+
+[[ $# -ge 1 ]] || die_usage "missing command"
+command="$1"
+shift
+case "$command" in
+  probe) cmd_probe "$@" ;;
+  resolve) cmd_resolve "$@" ;;
+  use) cmd_use "$@" ;;
+  record) cmd_record "$@" ;;
+  status) cmd_status "$@" ;;
+  -h | --help | help) usage ;;
+  *) die_usage "unknown command '$command'" ;;
+esac
