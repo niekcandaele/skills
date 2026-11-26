@@ -2,6 +2,8 @@
 
 A lane is one scout with one evidence source. This file lists starting points to choose from, not a set to run in full. Pick a lane only when this repo actually has its source. Write each prompt for this repo: name the exact paths, commands, MCP name and date range, and say what to count. Invent lanes the menu lacks whenever the product has its own evidence, such as a plugin ecosystem, a billing system, or support tickets.
 
+A ticket lane reads every ticket in its census bucket, and each ticket ends in exactly one place: a finding's `closes`, `close_candidates` with a one-line reason, or `standalone`. It attaches a ticket to an existing cluster when one fits and forms a new group only when none does.
+
 Each lane is `{ label, tier, prompt }`. `tier` is `scout` (mid-tier model; counting and grepping) or `reviewer` (strong model; judgement over code). The script adds the read-only rules and the output format.
 
 ## History: what agents and humans struggled with
@@ -11,7 +13,10 @@ Each lane is `{ label, tier, prompt }`. `tier` is `scout` (mid-tier model; count
 ## Tracker: what the team already wrote down
 
 - **Flaky CI**: issues about flaky or brittle tests, plus the CI provider's run history. Cluster by root cause. Report failure rates per branch and job, and the split between infrastructure and real failures.
-- **Follow-up tickets**: every open issue. Group them into themes where one structural fix would close many. Measure creation vs closure rates and the age of what gets closed.
+- **Ticket buckets**, one lane per census bucket of defects and planned work. Group the tickets by the one fix that would close them. A ticket that is stale, already fixed, a duplicate or not a defect is a close candidate.
+- **Reported observations**, one lane per product area: UX notes, friction reports and feedback tickets. Group them into concrete improvements. A small improvement is still a finding: synthesis bundles it.
+- **Prepared clusters**: tickets that already group others. Each is a ready-made finding with `existing_cluster` set to its ref. Check that its members share the cause and that its proposed fix holds; keep its grouping.
+- **Tracker flow**: creation vs closure rates per kind and author, the age of what gets closed, and which closing rules are ever used.
 
 ## Code: what the repo admits and hides
 
