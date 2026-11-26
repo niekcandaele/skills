@@ -3,8 +3,9 @@ name: unslop-audit
 description: >-
   Periodic whole-repo health audit: scouts gather evidence from whatever the repo has (agent
   history, tracker, CI, telemetry, code); deep-dives verify and design fixes with before/after
-  diagrams; skeptics attack each proposal; a critic hunts gaps. Ends in a picture-first report
-  page of ranked, sequenced proposals. Expensive (dozens of subagents).
+  diagrams; skeptics attack each proposal; a critic hunts gaps. Every open ticket is read and
+  accounted for. Ends in a picture-first report page of ranked, sequenced proposals. Expensive
+  (dozens of subagents).
 argument-hint: "[--repo=<path>] [--candidates=12-20]"
 disable-model-invocation: true
 allowed-tools:
@@ -37,25 +38,38 @@ Bind the run to this repo. If it has an engineer skill, invoke it first and pass
 
 Then survey which evidence sources this repo really has: transcript stores (across all harness accounts on the machine), the tracker, CI history, observability MCPs, docs and ADRs, and the code areas. From that, write 8-16 **lanes**, using [`references/lanes.md`](references/lanes.md) as a menu and adding lanes this product needs. Every lane prompt names its concrete source: paths, commands, MCP name, date range.
 
+**Ticket census.** A tracker lane that samples misses the long tail, so the census gives every open ticket to exactly one lane:
+- Count the open tickets by kind, by author or agent role, and by product area.
+- Split any bucket above about 60 tickets until one scout can read every ticket in it.
+- Give each bucket a lane whose prompt carries the exact query that selects it and its count.
+- Tickets that already group others (root-cause, cluster or epic tickets) form their own "prepared clusters" lanes.
+
+Save it in the brief as `census: { total, buckets: [{ label, count, lane }] }`. Ticket lanes come on top of the 8-16.
+
 Fill the rest of the `args` documented at the top of [`scripts/audit.workflow.js`](scripts/audit.workflow.js):
 - `project`: one line on stack and shape.
 - `rules`: the repo's own hard don'ts.
 - `models` by cost tier. `scout` and `skeptic` are mid tier. `reviewer`, `dive` and `lead` are the strongest tier below yours.
 - `previous`: if `~/.local/share/unslop-audit/<repo>/` holds an earlier run, the `{id, title, score}` of its proposals. Recurring problems then keep their ids and show their trend.
 
-Done when every lane names a source that exists. Save the brief as `brief.json` in the scratchpad.
+Done when every lane names a source that exists and the census bucket counts add up to the open-ticket total. Save the brief as `brief.json` in the scratchpad.
 
 ## 2. Fan out
 
-Run the script with the brief as input. With Claude Code's workflow runner, that is `Workflow({ scriptPath: "<this skill>/scripts/audit.workflow.js", args: <brief> })`. On a harness without one, dispatch the same prompts as subagents: the lanes in parallel, then synthesis, then a dive→skeptic pair per candidate, then the critic.
+Run the script with the brief as input. With Claude Code's workflow runner, that is `Workflow({ scriptPath: "<this skill>/scripts/audit.workflow.js", args: <brief> })`. On a harness without one, dispatch the same prompts as subagents: the lanes in parallel, then synthesis, then a dive→skeptic pair per candidate beside one checker per bundle and per 80 close-list entries, then the critic.
 
-Before starting, tell the human the cost in one line: about lanes + 2 × candidates + 2 agents. One run with 16 lanes and 24 candidates took about 6M tokens and 2.5 hours. Then wait for the completion notice.
+Before starting, tell the human the cost in one line: about lanes + 2 × candidates + bundles + 3 agents. One run with 16 lanes and 24 candidates took about 6M tokens and 2.5 hours; ticket lanes and bundle checks run on the mid tier and add roughly a quarter on a tracker of a thousand tickets. Then wait for the completion notice.
 
 ## 3. Read
 
 Condense the output with `jq` (`.result.results[] | {proposal, challenge}`, `.result.critic`). Read every proposal together with its challenge. The score is the skeptic's `priority_score`. Where the skeptic and the deep-dive disagree, the skeptic's `claims_checked` and `effort_risk_correction` win.
 
-Done when you can state, for every proposal, its score, its biggest objection, and where the critic sequenced it.
+Then read the ticket side (`.result.bundles`, `.result.close_list`, `.result.coverage`):
+- A **bundle** is a set of small fixes in one area that ships as one PR. It had a light check, not a deep dive. `rejected_bundles` holds the ones a checker turned down; their tickets show up as unplaced.
+- The **close list** is tickets the scouts judge not worth doing, each with a reason. Entries a checker removed are already gone.
+- **Coverage** counts each open ticket once: closed by a proposal, closed by a bundle, on the close list, standalone, or unexamined. `unplaced` lists tickets a scout grouped that no surviving proposal or bundle claims, usually because a deep dive narrowed its `closes`; `removed_by_check` lists what a checker took out. Both are real open work: show them as standalone.
+
+Done when you can state, for every proposal, its score, its biggest objection, and where the critic sequenced it, and can explain every unexamined and unplaced ticket in the coverage.
 
 ## 4. Report
 
@@ -65,6 +79,8 @@ Design one page for this audit's findings. Don't use a template: let the evidenc
 - **The headline numbers** as stat tiles and comparison charts (useful vs waste, cause shares, trends).
 - **The ranking**, with what the skeptics changed: score shifts and the claims they refuted.
 - **Waves**: the order of work, built from the critic's sequencing and then score per effort. Wave 0 is small, safe, and stops active damage. Critic gaps go into a wave too.
+- **Ticket coverage** as one picture: of the open tickets, how many a proposal closes, a bundle closes, the close list holds, stand alone, and went unexamined. Each proposal and bundle shows the tickets it closes.
+- **The close list**, grouped by reason, so the human can approve it as a batch.
 - **Cross-cutting rules**: patterns that several proposals share, each phrased as a mechanism (a check, a budget, a WIP limit).
 
 Every number on the page traces back to a proposal or a scout note (`scout-*.md` in the scratchpad).
@@ -83,4 +99,6 @@ Render the page headless and screenshot it in light and dark at desktop width, a
   - the claims the skeptics refuted
   - any assumption a proposal rests on that nobody tested
 
-  Offer `to-tickets` for the waves the human picks.
+  Offer two things, each only on the human's word:
+  - `to-tickets` for the waves and bundles the human picks. Each ticket carries its `closes` list, so the fix PR closes the tickets it resolves.
+  - applying the close list through the tracker's own closing rules, with each entry's reason as the closing comment.
