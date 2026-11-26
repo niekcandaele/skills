@@ -221,7 +221,10 @@ const checkedBundles = bundles.map(b => {
   return { ...b, items, check: check ? { holds_up: check.holds_up, removed: check.remove, note: check.note } : null }
 })
 const closeGone = new Set(checks.filter(c => c.chunk !== undefined).flatMap(c => [...removedFrom(c)]))
-const closeList = [...closeAll.values()].filter(c => !closeGone.has(c.ref))
+const liveBundles = checkedBundles.filter(b => b.check?.holds_up !== false && b.items.length)
+const rejectedBundles = checkedBundles.filter(b => !liveBundles.includes(b))
+const fixRefs = new Set([...done.filter(d => d.proposal.verdict !== 'refuted').flatMap(d => d.proposal.closes || []), ...liveBundles.flatMap(b => b.items.flatMap(it => it.closes))].map(norm))
+const closeList = [...closeAll.values()].filter(c => !closeGone.has(c.ref) && !fixRefs.has(c.ref))
 
 // Each ticket counts once: proposal over bundle over close list over standalone.
 const placed = new Set()
@@ -230,7 +233,7 @@ const seen = new Set(ok.flatMap(s => [...s.findings.flatMap(f => f.closes || [])
 const coverage = {
   open_tickets: A.census?.total ?? null,
   by_proposal: claim(done.filter(d => d.proposal.verdict !== 'refuted').flatMap(d => d.proposal.closes || [])),
-  by_bundle: claim(checkedBundles.filter(b => b.check?.holds_up !== false).flatMap(b => b.items.flatMap(it => it.closes))),
+  by_bundle: claim(liveBundles.flatMap(b => b.items.flatMap(it => it.closes))),
   close_list: claim(closeList.map(c => c.ref)),
   standalone: claim(ok.flatMap(s => s.standalone || [])),
 }
@@ -254,4 +257,4 @@ ${JSON.stringify(done.map(d => ({ id: d.proposal.id, title: d.proposal.title, ve
     required: ['gaps', 'conflicts_and_sequencing'],
   } })
 
-return { scouts: ok.map(s => ({ scout: s.scout, n: s.findings.length })), candidates: synth.candidates, results: done, bundles: checkedBundles, close_list: closeList, coverage, critic }
+return { scouts: ok.map(s => ({ scout: s.scout, n: s.findings.length })), candidates: synth.candidates, results: done, bundles: liveBundles, rejected_bundles: rejectedBundles, close_list: closeList, coverage, critic }

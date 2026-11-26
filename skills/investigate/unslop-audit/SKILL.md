@@ -65,7 +65,7 @@ Before starting, tell the human the cost in one line: about lanes + 2 × candida
 Condense the output with `jq` (`.result.results[] | {proposal, challenge}`, `.result.critic`). Read every proposal together with its challenge. The score is the skeptic's `priority_score`. Where the skeptic and the deep-dive disagree, the skeptic's `claims_checked` and `effort_risk_correction` win.
 
 Then read the ticket side (`.result.bundles`, `.result.close_list`, `.result.coverage`):
-- A **bundle** is a set of small fixes in one area that ships as one PR. It had a light check, not a deep dive.
+- A **bundle** is a set of small fixes in one area that ships as one PR. It had a light check, not a deep dive. `rejected_bundles` holds the ones a checker turned down; their tickets show up as unplaced.
 - The **close list** is tickets the scouts judge not worth doing, each with a reason. Entries a checker removed are already gone.
 - **Coverage** counts each open ticket once: closed by a proposal, closed by a bundle, on the close list, standalone, or unexamined. `unplaced` lists tickets a scout grouped that no surviving proposal or bundle claims, usually because a deep dive narrowed its `closes`; `removed_by_check` lists what a checker took out. Both are real open work: show them as standalone.
 
